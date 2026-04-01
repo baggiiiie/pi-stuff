@@ -208,6 +208,7 @@ export function renderHtml(initialPayload: ChartPayload): string {
 		const fmt = new Intl.NumberFormat();
 		const compactFmt = new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 });
 		let chart;
+		let currentPayload = null;
 
 		function formatTokens(value) {
 			if (value == null || Number.isNaN(value)) return '—';
@@ -278,6 +279,7 @@ export function renderHtml(initialPayload: ChartPayload): string {
 							bodyFont: { family: "'IBM Plex Mono', monospace", size: 11 },
 							footerFont: { family: "'IBM Plex Mono', monospace", size: 11, weight: '600' },
 							padding: 10,
+							titleMarginBottom: 6,
 							cornerRadius: 0,
 							displayColors: true,
 							boxWidth: 8,
@@ -285,7 +287,14 @@ export function renderHtml(initialPayload: ChartPayload): string {
 							boxPadding: 4,
 							callbacks: {
 								title(items) {
-									return 'Turn ' + items[0].label;
+									const point = currentPayload?.points[items[0].dataIndex];
+									const lines = ['Turn ' + items[0].label];
+									if (point?.turnLabel) lines.push(point.turnLabel);
+									return lines;
+								},
+								afterTitle(items) {
+									const point = currentPayload?.points[items[0].dataIndex];
+									return point?.summary || '';
 								},
 								label(item) {
 									return ' ' + item.dataset.label + '  ' + fmt.format(item.raw || 0);
@@ -345,6 +354,7 @@ export function renderHtml(initialPayload: ChartPayload): string {
 		}
 
 		window.updateChart = function updateChart(payload) {
+			currentPayload = payload;
 			updateMeta(payload);
 			const empty = document.getElementById('emptyState');
 			const instance = ensureChart();

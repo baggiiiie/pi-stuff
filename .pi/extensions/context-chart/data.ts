@@ -19,6 +19,8 @@ export type Snapshot = {
 	memory: number;
 	total: number;
 	source: "recorded" | "live";
+	turnLabel?: string;
+	summary?: string;
 	timestamp?: number;
 };
 
@@ -51,15 +53,23 @@ export function buildRecordedSnapshots(ctx: ExtensionContext): Snapshot[] {
 	const systemPrompt = ctx.getSystemPrompt() ?? "";
 	const snapshots: Snapshot[] = [];
 	let turn = 0;
+	let lastUserText = "";
 
 	for (const entry of branch) {
+		if (entry.type === "message" && entry.message.role === "user") {
+			lastUserText = extractFirstText(entry.message);
+		}
 		if (entry.type !== "message" || entry.message.role !== "assistant") continue;
 		turn += 1;
+		const toolNames = extractToolNames(entry.message);
 		const context = buildSessionContext(entries, entry.parentId ?? null, byId);
 		snapshots.push({
 			...buildSnapshot(context.messages, systemPrompt, turn, "recorded"),
+			turnLabel: toolNames.length > 0 ? (toolNames.length === 1 ? "Tool call" : "Tool calls") : "User message",
+			summary: buildTurnSummary(lastUserText, toolNames),
 			timestamp: safeTimestamp(entry.timestamp),
 		});
+		lastUserText = "";
 	}
 
 	return snapshots;
@@ -68,7 +78,19 @@ export function buildRecordedSnapshots(ctx: ExtensionContext): Snapshot[] {
 export function buildLiveSnapshot(event: ContextEvent, ctx: ExtensionContext): Snapshot {
 	const branch = ctx.sessionManager.getBranch();
 	const nextTurn = countAssistantMessages(branch) + 1;
-	return buildSnapshot(event.messages, ctx.getSystemPrompt() ?? "", nextTurn, "live");
+	const snapshot = buildSnapshot(event.messages, ctx.getSystemPrompt() ?? "", nextTurn, "live");
+
+	let lastUserText = "";
+	for (let i = event.messages.length - 1; i >= 0; i--) {
+		if (event.messages[i].role === "user") {
+			lastUserText = extractFirstText(event.messages[i]);
+			break;
+		}
+	}
+	snapshot.turnLabel = "User message";
+	snapshot.summary = buildTurnSummary(lastUserText, []);
+
+	return snapshot;
 }
 
 export function buildPayload(ctx: ExtensionContext, recordedSnapshots: Snapshot[], liveSnapshot: Snapshot | null): ChartPayload {
@@ -219,4 +241,40 @@ function extractText(message: AgentMessage): string {
 function safeTimestamp(timestamp: string): number | undefined {
 	const value = Date.parse(timestamp);
 	return Number.isFinite(value) ? value : undefined;
+}
+
+function extractFirstText(message: AgentMessage): string {
+	const anyMsg = message as any;
+	if (typeof anyMsg.content === "string") return anyMsg.content.trim().replace(/\s+/g, " ");
+	if (Array.isArray(anyMsg.content)) {
+		for (const block of anyMsg.content) {
+			if (block.type === "text" && block.text) return block.text.trim().replace(/\s+/g, " ");
+		}
+	}
+	return "";
+}
+
+function extractToolNames(message: AgentMessage): string[] {
+	const anyMsg = message as any;
+	const names: string[] = [];
+	if (Array.isArray(anyMsg.content)) {
+		for (const block of anyMsg.content) {
+			if (block.type === "toolCall" && block.name && !names.includes(block.name)) {
+				names.push(block.name);
+			}
+		}
+	}
+	return names;
+}
+
+function buildTurnSummary(userText: string, toolNames: string[]): string {
+	const parts: string[] = [];
+	if (userText) {
+		const truncated = userText.length > 80 ? userText.slice(0, 80) + "…" : userText;
+		parts.push(`"${truncated}"`);
+	}
+	if (toolNames.length > 0) {
+		parts.push(toolNames.join(", "));
+	}
+	return parts.join(" · ");
 }
