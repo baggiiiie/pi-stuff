@@ -1,9 +1,13 @@
 import { pathToFileURL } from "node:url";
+import { execSync } from "node:child_process";
+import path from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { buildRecordedSnapshots, buildLiveSnapshot, buildPayload, type Snapshot, type ChartPayload } from "./data.ts";
 import { renderHtml } from "./ui.ts";
 
-const GLIMPSE_PATH = "/Users/ydai/.npm-global/lib/node_modules/glimpseui/src/glimpse.mjs";
+// Dynamically resolve glimpseui path from npm global modules
+const npmGlobalPath = execSync("npm root -g").toString().trim();
+const GLIMPSE_PATH = path.join(npmGlobalPath, "glimpseui", "src", "glimpse.mjs");
 const WINDOW_TITLE = "Session Context Usage";
 
 type GlimpseWindow = {
