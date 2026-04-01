@@ -117,7 +117,7 @@ export function renderHtml(initialPayload: ChartPayload): string {
 		.chart-shell {
 			flex: 1;
 			min-height: 320px;
-			padding: 16px 16px 8px;
+			padding: 16px;
 			background: var(--panel);
 			border: 1px solid var(--border);
 		}
@@ -137,6 +137,26 @@ export function renderHtml(initialPayload: ChartPayload): string {
 			color: var(--muted);
 			font-size: 13px;
 			font-family: ${MONO_FONT};
+		}
+		.chart-toggle {
+			display: inline-flex;
+			border: 1px solid var(--border);
+			background: var(--panel);
+			overflow: hidden;
+		}
+		.chart-toggle button {
+			all: unset;
+			padding: 4px 10px;
+			font-family: ${MONO_FONT};
+			font-size: 11px;
+			color: var(--muted);
+			cursor: pointer;
+			border-right: 1px solid var(--border);
+		}
+		.chart-toggle button:last-child { border-right: none; }
+		.chart-toggle button.active {
+			background: var(--accent);
+			color: #fff;
 		}
 		.footer {
 			display: flex;
@@ -184,6 +204,12 @@ export function renderHtml(initialPayload: ChartPayload): string {
 			</div>
 		</div>
 		<div class="chart-shell">
+			<div style="display:flex;justify-content:flex-end;margin-bottom:8px;">
+				<div class="chart-toggle">
+					<button id="btnLine" class="active" onclick="setChartType('line')">Line</button>
+					<button id="btnBar" onclick="setChartType('bar')">Bar</button>
+				</div>
+			</div>
 			<div class="canvas-wrap">
 				<canvas id="chart"></canvas>
 				<div class="empty" id="emptyState">Open this window before or during a conversation to watch context accumulate turn by turn.</div>
@@ -207,6 +233,7 @@ export function renderHtml(initialPayload: ChartPayload): string {
 		const compactFmt = new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 });
 		let chart;
 		let currentPayload = null;
+		let chartType = 'line';
 
 		function formatTokens(value) {
 			if (value == null || Number.isNaN(value)) return '—';
@@ -220,38 +247,48 @@ export function renderHtml(initialPayload: ChartPayload): string {
 		}
 
 		function buildDatasets(points) {
+			const isBar = chartType === 'bar';
 			return [
 				{ key: 'systemInstructions', label: 'System' },
 				{ key: 'userInput', label: 'User' },
 				{ key: 'agentOutput', label: 'Agent' },
 				{ key: 'tools', label: 'Tools' },
 				{ key: 'memory', label: 'Memory' },
-			].map((item) => ({
-				label: item.label,
-				data: points.map((point) => point[item.key] || 0),
-				fill: true,
-				stack: 'tokens',
-				borderColor: COLORS[item.key].stroke,
-				backgroundColor: COLORS[item.key].fill,
-				borderWidth: 1.5,
-				pointRadius: 2,
-				pointHoverRadius: 4,
-				tension: 0.2,
-			}));
+			].map((item) => {
+				return {
+					label: item.label,
+					data: points.map((point, i) => {
+						const val = point[item.key] || 0;
+						if (!isBar) return val;
+						const prev = i > 0 ? (points[i - 1][item.key] || 0) : 0;
+						return Math.max(0, val - prev);
+					}),
+					fill: !isBar,
+					stack: isBar ? undefined : 'tokens',
+					borderColor: COLORS[item.key].stroke,
+					backgroundColor: isBar ? COLORS[item.key].stroke + 'cc' : COLORS[item.key].fill,
+					borderWidth: isBar ? 1 : 1.5,
+					pointRadius: isBar ? 0 : 2,
+					pointHoverRadius: isBar ? 0 : 4,
+					tension: 0.2,
+				};
+			});
 		}
 
 		function ensureChart() {
 			if (typeof Chart === 'undefined') return null;
-			if (chart) return chart;
+			if (chart && chart._appType === chartType) return chart;
+			if (chart) { chart.destroy(); chart = null; }
 			const ctx = document.getElementById('chart');
 			const mutedColor = getComputedStyle(document.documentElement).getPropertyValue('--muted').trim();
 			const borderColor = getComputedStyle(document.documentElement).getPropertyValue('--border').trim();
 			chart = new Chart(ctx, {
-				type: 'line',
+				type: chartType,
 				data: { labels: [], datasets: [] },
 				options: {
 					animation: false,
 					maintainAspectRatio: false,
+					layout: { padding: { bottom: 16 } },
 					interaction: { mode: 'index', intersect: false },
 					plugins: {
 						legend: {
@@ -299,21 +336,21 @@ export function renderHtml(initialPayload: ChartPayload): string {
 								},
 								footer(items) {
 									const total = items.reduce((sum, item) => sum + (item.raw || 0), 0);
-									return 'Total  ' + fmt.format(total);
+									return (chartType === 'bar' ? 'Total added  ' : 'Total  ') + fmt.format(total);
 								},
 							},
 						},
 					},
 					scales: {
 						x: {
-							stacked: true,
+							stacked: chartType === 'line',
 							title: { display: true, text: 'Turn', color: mutedColor, font: { family: ${JSON.stringify(MONO_FONT)}, size: 11 } },
 							grid: { color: borderColor, lineWidth: 0.5 },
 							ticks: { color: mutedColor, font: { family: ${JSON.stringify(MONO_FONT)}, size: 11 } },
 							border: { color: borderColor },
 						},
 						y: {
-							stacked: true,
+							stacked: chartType === 'line',
 							beginAtZero: true,
 							title: { display: true, text: 'Tokens', color: mutedColor, font: { family: ${JSON.stringify(MONO_FONT)}, size: 11 } },
 							grid: { color: borderColor, lineWidth: 0.5 },
@@ -327,6 +364,7 @@ export function renderHtml(initialPayload: ChartPayload): string {
 					},
 				},
 			});
+			chart._appType = chartType;
 			return chart;
 		}
 
@@ -350,6 +388,13 @@ export function renderHtml(initialPayload: ChartPayload): string {
 				'Estimating prompt composition for each model request in the current branch.' +
 				(payload.points.some((point) => point.source === 'live') ? ' Live point shown for the in-flight request.' : '');
 		}
+
+		window.setChartType = function setChartType(type) {
+			chartType = type;
+			document.getElementById('btnLine').classList.toggle('active', type === 'line');
+			document.getElementById('btnBar').classList.toggle('active', type === 'bar');
+			if (currentPayload) window.updateChart(currentPayload);
+		};
 
 		window.updateChart = function updateChart(payload) {
 			currentPayload = payload;
