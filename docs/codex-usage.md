@@ -13,6 +13,10 @@ This repo includes a project-local pi extension at:
 /codex-usage help
 ```
 
+The extension now fetches usage automatically on session start and after each turn, so the `codex-usage` status text stays visible even if you never run the command manually.
+
+Running `/codex-usage` still opens the full widget on demand.
+
 ## Real endpoint
 
 For pi users logged in with **ChatGPT Plus/Pro (Codex)**, the extension now uses this endpoint by default:
