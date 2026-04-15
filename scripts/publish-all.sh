@@ -4,6 +4,13 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
+if [ -f .env ]; then
+  set -a
+  # shellcheck disable=SC1091
+  . ./.env
+  set +a
+fi
+
 if [ ! -d packages ]; then
   echo "No packages/ directory found" >&2
   exit 1
@@ -19,6 +26,21 @@ for arg in "${EXTRA_ARGS[@]}"; do
 done
 if [ "$HAS_ACCESS_FLAG" = false ]; then
   EXTRA_ARGS=(--access public "${EXTRA_ARGS[@]}")
+fi
+
+if [ -n "${NPM_TOKEN:-}" ]; then
+  echo "Using NPM_TOKEN for non-interactive npm auth"
+else
+  cat >&2 <<'EOF'
+Warning: NPM_TOKEN is not set.
+
+Without a publish token, npm may ask you to authenticate separately for each package.
+To avoid repeated login/2FA prompts, put your npm publish token in .env or export it before running this script:
+
+  echo 'NPM_TOKEN=xxxxxxxxxxxxxxxx' > .env
+  npm run publish:all
+EOF
+  echo >&2
 fi
 
 mapfile -t PACKAGE_DIRS < <(find packages -mindepth 1 -maxdepth 1 -type d | sort)
