@@ -86,6 +86,8 @@ type WhamRaw = {
 
 type RuntimeContext = Pick<ExtensionCommandContext, "ui" | "modelRegistry">;
 
+type StatusContext = Pick<ExtensionCommandContext, "ui">;
+
 class CodexUsageEditor extends CustomEditor {
     private readonly isUsageActive: () => boolean;
     private readonly onDismiss: () => void;
@@ -117,14 +119,18 @@ export default function (pi: ExtensionAPI) {
     let refreshInFlight: Promise<UsageSnapshot> | undefined;
     const config = readConfig();
 
-    const closeUsageWidget = (ctx: Pick<ExtensionCommandContext, "ui">) => {
+    const closeUsageWidget = (ctx: StatusContext) => {
         ctx.ui.setWidget(KEY, undefined);
         isUsageActive = false;
     };
 
-    const clearUsage = (ctx: Pick<ExtensionCommandContext, "ui">) => {
+    const setUsageStatus = (ctx: StatusContext, text: string | undefined) => {
+        ctx.ui.setStatus(KEY, text ? ctx.ui.theme.fg("dim", text) : undefined);
+    };
+
+    const clearUsage = (ctx: StatusContext) => {
         closeUsageWidget(ctx);
-        ctx.ui.setStatus(KEY, undefined);
+        setUsageStatus(ctx, undefined);
     };
 
     const stopAutoRefresh = () => {
@@ -133,7 +139,7 @@ export default function (pi: ExtensionAPI) {
         refreshTimer = undefined;
     };
 
-    const showUsageError = (ctx: Pick<ExtensionCommandContext, "ui">, message: string, showWidget = false) => {
+    const showUsageError = (ctx: StatusContext, message: string, showWidget = false) => {
         if (showWidget) {
             ctx.ui.setWidget(KEY, [
                 "Codex usage unavailable",
@@ -144,7 +150,7 @@ export default function (pi: ExtensionAPI) {
             ]);
             isUsageActive = true;
         }
-        ctx.ui.setStatus(KEY, "Codex usage unavailable");
+        setUsageStatus(ctx, "Codex usage unavailable");
     };
 
     const getUsageSnapshot = async (ctx: RuntimeContext, options?: { force?: boolean }) => {
@@ -162,7 +168,7 @@ export default function (pi: ExtensionAPI) {
 
     const refreshUsage = async (ctx: RuntimeContext, options?: { showWidget?: boolean; showLoading?: boolean; force?: boolean }) => {
         if (options?.showLoading) {
-            ctx.ui.setStatus(KEY, "Codex usage loading...");
+            setUsageStatus(ctx, "Codex usage loading...");
         }
 
         try {
@@ -173,7 +179,7 @@ export default function (pi: ExtensionAPI) {
                     isUsageActive = true;
                 }
             } else {
-                ctx.ui.setStatus(KEY, buildStatusText(snapshot));
+                setUsageStatus(ctx, buildStatusText(snapshot));
             }
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
@@ -472,8 +478,8 @@ function looksLikeWhamUsage(raw: unknown): raw is WhamRaw {
     const obj = raw as WhamRaw;
     return Boolean(
         obj.plan_type ||
-            toFiniteNumber(obj.rate_limit?.primary_window?.used_percent) !== undefined ||
-            toFiniteNumber(obj.rate_limit?.secondary_window?.used_percent) !== undefined,
+        toFiniteNumber(obj.rate_limit?.primary_window?.used_percent) !== undefined ||
+        toFiniteNumber(obj.rate_limit?.secondary_window?.used_percent) !== undefined,
     );
 }
 
@@ -514,9 +520,9 @@ function normalizeRateWindow(raw: WhamWindowRaw | undefined): RateWindow | undef
     };
 }
 
-function renderUsage(snapshot: UsageSnapshot, ctx: Pick<ExtensionCommandContext, "ui">) {
+function renderUsage(snapshot: UsageSnapshot, ctx: StatusContext) {
     ctx.ui.setWidget(KEY, buildWhamWidgetLines(snapshot));
-    ctx.ui.setStatus(KEY, buildStatusText(snapshot));
+    ctx.ui.setStatus(KEY, ctx.ui.theme.fg("dim", buildStatusText(snapshot)));
 }
 
 function buildWhamWidgetLines(snapshot: UsageSnapshot): string[] {
@@ -524,7 +530,7 @@ function buildWhamWidgetLines(snapshot: UsageSnapshot): string[] {
         "Codex usage",
         "",
         ...(snapshot.plan ? [`Plan: ${capitalize(snapshot.plan)}`] : []),
-        ...(snapshot.primary ? [`Session:   ${formatWindow(snapshot.primary)}`] : []),
+        ...(snapshot.primary ? [`Session: ${formatWindow(snapshot.primary)}`] : []),
         ...(snapshot.secondary ? [`Weekly: ${formatWindow(snapshot.secondary)}`] : []),
     ];
 
@@ -558,14 +564,27 @@ function buildWhamWidgetLines(snapshot: UsageSnapshot): string[] {
 }
 
 function buildStatusText(snapshot: UsageSnapshot): string {
-    if (!snapshot.primary) {
+    const parts: string[] = [];
+
+    if (snapshot.primary) {
+        parts.push(formatStatusWindow("5hr", snapshot.primary));
+    }
+
+    if (snapshot.secondary) {
+        parts.push(formatStatusWindow("7d", snapshot.secondary));
+    }
+
+    if (parts.length === 0) {
         return "Codex usage ready";
     }
 
-    const reset = snapshot.primary.resetAfterSeconds
-        ? ` | resets in ${formatRelativeSeconds(snapshot.primary.resetAfterSeconds)}`
-        : "";
-    return `Codex Session Limit: ${Math.round(100 - snapshot.primary.usedPercent)}% left${reset}`;
+    return `Codex: ${parts.join(" | ")}`;
+}
+
+function formatStatusWindow(label: string, window: RateWindow): string {
+    const left = `${Math.round(100 - window.usedPercent)}% left`;
+    const reset = window.resetAfterSeconds ? ` (↪${formatStatusReset(window.resetAfterSeconds)})` : "";
+    return `${label} ${left}${reset}`;
 }
 
 function formatWindow(window: RateWindow): string {
@@ -643,6 +662,25 @@ function formatRelativeSeconds(seconds: number): string {
     if (minutes && parts.length < 2) parts.push(`${minutes}m`);
     if (parts.length === 0) parts.push(`${seconds}s`);
     return parts.slice(0, 2).join(" ");
+}
+
+function formatStatusReset(seconds: number): string {
+    if (seconds <= 0) return "now";
+
+    const days = Math.floor(seconds / 86400);
+    const hours = Math.floor((seconds % 86400) / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+
+    if (days > 0) {
+        return hours > 0 ? `${days}d${hours}h` : `${days}d`;
+    }
+    if (hours > 0) {
+        return minutes > 0 ? `${hours}hr${minutes}min` : `${hours}hr`;
+    }
+    if (minutes > 0) {
+        return `${minutes}min`;
+    }
+    return `${seconds}s`;
 }
 
 function capitalize(value: string): string {
