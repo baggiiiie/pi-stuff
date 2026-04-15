@@ -1,0 +1,13 @@
+{
+  "name": "@baggiiiie/pi-rtk-rewrite",
+  "version": "0.0.1",
+  "type": "module",
+  "files": ["src", "README.md", "LICENSE"],
+  "keywords": ["pi-package"],
+  "pi": {
+    "extensions": ["./src/index.ts"]
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": "*"
+  }
+}
