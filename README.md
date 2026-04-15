@@ -19,8 +19,14 @@ pi install ./packages/codex-usage
 From each package directory:
 
 ```bash
-cd packages/context-chart && npm publish
-cd packages/codex-usage && npm publish
+cd packages/context-chart && npm publish --access public
+cd packages/codex-usage && npm publish --access public
+```
+
+Or publish all non-private workspace packages from the repo root:
+
+```bash
+npm run publish:all
 ```
 
 Then users can install them independently:

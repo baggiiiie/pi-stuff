@@ -5,5 +5,8 @@
     "type": "module",
     "workspaces": [
         "packages/*"
-    ]
+    ],
+    "scripts": {
+        "publish:all": "./scripts/publish-all.sh"
+    }
 }
