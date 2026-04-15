@@ -5,6 +5,7 @@ import { matchesKey } from "@mariozechner/pi-tui";
 const KEY = "codex-usage";
 const DEFAULT_PROVIDER = "openai-codex";
 const DEFAULT_TIMEOUT_MS = 15_000;
+const DEFAULT_REFRESH_INTERVAL_MS = 5 * 60_000;
 const DEFAULT_URL = "https://chatgpt.com/backend-api/wham/usage";
 const JWT_CLAIM_PATH = "https://api.openai.com/auth";
 
@@ -12,6 +13,7 @@ type Config = {
     provider: string;
     url: string;
     timeoutMs: number;
+    refreshIntervalMs: number;
 };
 
 type RateWindow = {
@@ -94,6 +96,8 @@ class CodexUsageEditor extends CustomEditor {
 
 export default function (pi: ExtensionAPI) {
     let isUsageActive = false;
+    let refreshTimer: ReturnType<typeof setInterval> | undefined;
+    let refreshInFlight: Promise<UsageSnapshot> | undefined;
     const config = readConfig();
 
     const closeUsageWidget = (ctx: Pick<ExtensionCommandContext, "ui">) => {
@@ -104,6 +108,12 @@ export default function (pi: ExtensionAPI) {
     const clearUsage = (ctx: Pick<ExtensionCommandContext, "ui">) => {
         closeUsageWidget(ctx);
         ctx.ui.setStatus(KEY, undefined);
+    };
+
+    const stopAutoRefresh = () => {
+        if (!refreshTimer) return;
+        clearInterval(refreshTimer);
+        refreshTimer = undefined;
     };
 
     const showUsageError = (ctx: Pick<ExtensionCommandContext, "ui">, message: string, showWidget = false) => {
@@ -120,13 +130,22 @@ export default function (pi: ExtensionAPI) {
         ctx.ui.setStatus(KEY, "Codex usage unavailable");
     };
 
+    const getUsageSnapshot = async (ctx: RuntimeContext) => {
+        if (!refreshInFlight) {
+            refreshInFlight = fetchUsage(config, ctx).finally(() => {
+                refreshInFlight = undefined;
+            });
+        }
+        return await refreshInFlight;
+    };
+
     const refreshUsage = async (ctx: RuntimeContext, options?: { showWidget?: boolean; showLoading?: boolean }) => {
         if (options?.showLoading) {
             ctx.ui.setStatus(KEY, "Codex usage loading...");
         }
 
         try {
-            const snapshot = await fetchUsage(config, ctx);
+            const snapshot = await getUsageSnapshot(ctx);
             if (options?.showWidget || isUsageActive) {
                 renderUsage(snapshot, ctx);
                 if (options?.showWidget) {
@@ -139,6 +158,16 @@ export default function (pi: ExtensionAPI) {
             const message = error instanceof Error ? error.message : String(error);
             showUsageError(ctx, message, Boolean(options?.showWidget || isUsageActive));
         }
+    };
+
+    const startAutoRefresh = (ctx: RuntimeContext) => {
+        stopAutoRefresh();
+        if (config.refreshIntervalMs <= 0) return;
+
+        refreshTimer = setInterval(() => {
+            void refreshUsage(ctx);
+        }, config.refreshIntervalMs);
+        refreshTimer.unref?.();
     };
 
     pi.registerCommand(KEY, {
@@ -168,14 +197,12 @@ export default function (pi: ExtensionAPI) {
         ctx.ui.setEditorComponent((tui, theme, keybindings) =>
             new CodexUsageEditor(tui, theme, keybindings, () => isUsageActive, () => closeUsageWidget(ctx)),
         );
-        await refreshUsage(ctx, { showLoading: true });
-    });
-
-    pi.on("turn_end", async (_event, ctx) => {
+        startAutoRefresh(ctx);
         await refreshUsage(ctx, { showLoading: true });
     });
 
     pi.on("session_shutdown", (_event, ctx) => {
+        stopAutoRefresh();
         clearUsage(ctx);
     });
 }
@@ -196,7 +223,9 @@ function showHelp(config: Config, ctx: Pick<ExtensionCommandContext, "ui">) {
         `  CODEX_USAGE_URL=${config.url}`,
         `  CODEX_USAGE_PROVIDER=${config.provider}`,
         `  CODEX_USAGE_TIMEOUT_MS=${config.timeoutMs}`,
+        `  CODEX_USAGE_REFRESH_INTERVAL_MS=${config.refreshIntervalMs}`,
         "",
+        "Set CODEX_USAGE_REFRESH_INTERVAL_MS=0 to disable background refresh.",
         "Endpoint must return ChatGPT WHAM-style usage JSON.",
         "",
         "The built-in default adds chatgpt-account-id, originator=pi, and a pi-style User-Agent.",
@@ -376,12 +405,18 @@ function readConfig(): Config {
         provider: process.env.CODEX_USAGE_PROVIDER?.trim() || DEFAULT_PROVIDER,
         url: process.env.CODEX_USAGE_URL?.trim() || DEFAULT_URL,
         timeoutMs: parseTimeout(process.env.CODEX_USAGE_TIMEOUT_MS),
+        refreshIntervalMs: parseRefreshInterval(process.env.CODEX_USAGE_REFRESH_INTERVAL_MS),
     };
 }
 
 function parseTimeout(value: string | undefined): number {
     const parsed = Number.parseInt(value ?? "", 10);
     return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_TIMEOUT_MS;
+}
+
+function parseRefreshInterval(value: string | undefined): number {
+    const parsed = Number.parseInt(value ?? "", 10);
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : DEFAULT_REFRESH_INTERVAL_MS;
 }
 
 function toFiniteNumber(value: unknown): number | undefined {

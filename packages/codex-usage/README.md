@@ -25,3 +25,12 @@ pi install npm:@baggiiiie/pi-codex-usage
 ## Notes
 
 Run `/login` in pi and choose ChatGPT Plus/Pro (Codex) before using the default endpoint.
+
+The package now refreshes in the background every 5 minutes by default instead of on every `turn_end`.
+
+Optional environment overrides:
+
+```bash
+CODEX_USAGE_REFRESH_INTERVAL_MS=300000   # 5 min default
+CODEX_USAGE_REFRESH_INTERVAL_MS=0        # disable background refresh
+```
