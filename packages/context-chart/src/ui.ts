@@ -422,6 +422,11 @@ export function renderHtml(initialPayload: ChartPayload): string {
 			const MAX = 3;
 			document.addEventListener('keydown', (e) => {
 				if (!(e.metaKey || e.ctrlKey)) return;
+				if (e.key === 'w') {
+					e.preventDefault();
+					window.webkit.messageHandlers.glimpse.postMessage(JSON.stringify({__glimpse_close: true}));
+					return;
+				}
 				if (e.key === '=' || e.key === '+') {
 					e.preventDefault();
 					zoomLevel = Math.min(MAX, zoomLevel + STEP);
