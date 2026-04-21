@@ -5,6 +5,7 @@ My small collection of [pi](https://github.com/badlogic/pi-mono) extension packa
 Available packages:
 - `@baggiiiie/pi-codex-usage`: shows Codex usage with a command and status widget
 - `@baggiiiie/pi-context-chart`: opens a live context usage chart to see which turn blew up current context window
+- `@baggiiiie/pi-context-status`: shows current context-window usage in Pi's status line or a custom footer
 - `@baggiiiie/pi-rtk-rewrite`: proxies pi `bash` tool calls through [rtk](https://github.com/rtk-ai/rtk) before execution
 
 ## Install 
@@ -18,6 +19,7 @@ or individually:
 
 ```bash
 pi install npm:@baggiiiie/pi-context-chart
+pi install npm:@baggiiiie/pi-context-status
 pi install npm:@baggiiiie/pi-rtk-rewrite
 pi install npm:@baggiiiie/pi-codex-usage
 ```
@@ -45,6 +47,31 @@ pi install npm:@baggiiiie/pi-context-chart
 
 Notes:
 - Requires `glimpseui` to be installed where Node can resolve it, or `GLIMPSE_PATH` set to `.../glimpseui/src/glimpse.mjs`.
+
+### `@baggiiiie/pi-context-status`
+
+Shows the current context window in Pi's status area, including an estimated breakdown by system/user/assistant/tools/memory.
+
+Commands:
+
+```text
+/context-status status
+/context-status footer
+/context-status off
+/context-status refresh
+/context-status help
+```
+
+Install individually:
+
+```bash
+pi install npm:@baggiiiie/pi-context-status
+```
+
+Notes:
+- Defaults to compact `status` mode on session start.
+- Set `PI_CONTEXT_STATUS_MODE=footer` for an expanded custom footer.
+- Falls back to a local estimate right after compaction until Pi has fresh context usage again.
 
 ### `@baggiiiie/pi-codex-usage`
 

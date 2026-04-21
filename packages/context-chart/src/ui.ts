@@ -253,7 +253,7 @@ export function renderHtml(initialPayload: ChartPayload): string {
 				{ key: 'userInput', label: 'User' },
 				{ key: 'agentOutput', label: 'Agent' },
 				{ key: 'tools', label: 'Tools' },
-				{ key: 'memory', label: 'Memory' },
+				{ key: 'memory', label: 'Carried context' },
 			].map((item) => {
 				return {
 					label: item.label,
