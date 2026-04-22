@@ -513,7 +513,10 @@ export function renderHtml(initialPayload: ChartPayload): string {
 							escapeHtml(tool.name) +
 							(tool.isError ? ' <span class="error-badge">error</span>' : '') +
 						'</div>' +
-						'<div class="tool-result" id="tool-result-' + i + '">' + escapeHtml(tool.result || '(empty)') + '</div>' +
+						'<div class="tool-result" id="tool-result-' + i + '">' +
+							(tool.args ? '<div style="color:var(--text);margin-bottom:6px;border-bottom:1px solid var(--border);padding-bottom:6px;">' + escapeHtml(tool.args) + '</div>' : '') +
+							escapeHtml(tool.result || '(empty)') +
+						'</div>' +
 					'</div>'
 				).join('');
 			}

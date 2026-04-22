@@ -11,6 +11,7 @@ const EXTENSION_SNAPSHOT_VERSION = 1;
 
 export type ToolDetail = {
 	name: string;
+	args?: string;
 	result: string;
 	isError: boolean;
 };
@@ -278,6 +279,19 @@ function extractToolNames(message: AgentMessage): string[] {
 }
 
 function extractToolDetails(branch: SessionEntry[], assistantIndex: number): ToolDetail[] {
+	const assistantEntry = branch[assistantIndex];
+	const argsById = new Map<string, string>();
+	if (assistantEntry.type === "message") {
+		const content = (assistantEntry.message as any).content;
+		if (Array.isArray(content)) {
+			for (const block of content) {
+				if (block.type === "toolCall" && block.id) {
+					argsById.set(block.id, JSON.stringify(block.arguments ?? {}, null, 2));
+				}
+			}
+		}
+	}
+
 	const details: ToolDetail[] = [];
 	for (let j = assistantIndex + 1; j < branch.length; j++) {
 		const entry = branch[j];
@@ -290,9 +304,9 @@ function extractToolDetails(branch: SessionEntry[], assistantIndex: number): Too
 					.map((b: any) => b.text ?? "")
 					.join("\n")
 				: "";
-			details.push({ name: msg.toolName ?? "unknown", result: text, isError: !!msg.isError });
+			details.push({ name: msg.toolName ?? "unknown", args: argsById.get(msg.toolCallId), result: text, isError: !!msg.isError });
 		} else if (msg.role === "bashExecution") {
-			details.push({ name: msg.command ?? "bash", result: msg.output ?? "", isError: (msg.exitCode ?? 0) !== 0 });
+			details.push({ name: "bash", args: msg.command ?? undefined, result: msg.output ?? "", isError: (msg.exitCode ?? 0) !== 0 });
 		} else if (msg.role === "user" || msg.role === "assistant") {
 			break;
 		}
