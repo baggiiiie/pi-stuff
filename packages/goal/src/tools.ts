@@ -6,8 +6,8 @@ import { goalToolResponse } from "./utils";
 import { refreshGoalUi } from "./ui";
 
 const CreateGoalParams = Type.Object({
-  objective: Type.String({ description: "Required. The concrete objective to pursue. Only create a goal when explicitly requested by the user/system/developer." }),
-  token_budget: Type.Optional(Type.Number({ description: "Optional positive token budget for the new active goal." })),
+  objective: Type.String({ minLength: 1, description: "Required. The concrete objective to pursue. Only create a goal when explicitly requested by the user/system/developer." }),
+  token_budget: Type.Optional(Type.Integer({ minimum: 1, description: "Optional positive token budget for the new active goal." })),
 });
 
 const UpdateGoalParams = Type.Object({

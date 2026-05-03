@@ -30,7 +30,7 @@ This extension mirrors that design for pi:
 
 The model can mark completion only by calling `update_goal({ "status": "complete" })` after auditing the objective against real evidence.
 
-## How Codex `/goal` work
+## How Codex `/goal` works
 
 Codex goals are a persisted “keep working until done” workflow for a thread.
 

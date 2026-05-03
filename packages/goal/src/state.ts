@@ -21,15 +21,20 @@ export class GoalStore {
   }
 
   create(objective: string, tokenBudget?: number) {
+    const trimmedObjective = objective.trim();
+    if (!trimmedObjective) throw new Error("goal objective cannot be empty");
+    if (tokenBudget != null && (!Number.isFinite(tokenBudget) || tokenBudget <= 0)) {
+      throw new Error("token_budget must be a positive number when provided");
+    }
     if (this.goal) {
       throw new Error("cannot create a new goal because this thread already has a goal; use update_goal only when the existing goal is complete or /goal clear first");
     }
     const t = nowSeconds();
     this.goal = {
       id: newGoalId(),
-      objective,
+      objective: trimmedObjective,
       status: "active",
-      tokenBudget: tokenBudget && tokenBudget > 0 ? Math.floor(tokenBudget) : undefined,
+      tokenBudget: tokenBudget == null ? undefined : Math.floor(tokenBudget),
       tokensUsed: 0,
       timeUsedSeconds: 0,
       createdAt: t,
