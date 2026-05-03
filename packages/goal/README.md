@@ -1,8 +1,36 @@
 # Goal extension
 
-Codex-style persisted goals for pi, based on the `goal` feature released in OpenAI Codex `rust-v0.128.0`.
+Codex-style persisted goals for pi, based on the `goal` feature released in [OpenAI Codex](https://github.com/openai/codex/releases/tag/rust-v0.128.0).
 
-## How Codex goals work
+## Install
+
+```bash
+pi install npm:@baggiiiie/pi-goal
+```
+
+## This pi extension
+
+This extension mirrors that design for pi:
+
+- Persisted per-session goal state via custom session entries.
+- `/goal` controls to create, pause, resume, clear, and inspect goals.
+- Model tools: `get_goal`, `create_goal`, `update_goal`.
+- Runtime continuation: active goals automatically enqueue follow-up turns until completed, paused, cleared, or budget-limited.
+- Budget accounting: approximate token usage plus elapsed active-turn time; optional `--tokens` budget triggers a budget-limited wrap-up prompt.
+
+## Usage
+
+```text
+/goal ship the new auth flow --tokens 50000
+/goal status
+/goal pause
+/goal resume
+/goal clear
+```
+
+The model can mark completion only by calling `update_goal({ "status": "complete" })` after auditing the objective against real evidence.
+
+## How Codex `/goal` work
 
 Codex goals are a persisted “keep working until done” workflow for a thread.
 
@@ -36,24 +64,3 @@ If an active goal reaches its token budget, Codex marks it `budget_limited` and 
 
 The key design choice: **the model may complete goals, but it may not pause, resume, clear, or budget-limit them.** This prevents the model from escaping the workflow merely because it is near budget, uncertain, or ready to stop.
 
-## This pi extension
-
-This extension mirrors that design for pi:
-
-- Persisted per-session goal state via custom session entries.
-- `/goal` controls to create, pause, resume, clear, and inspect goals.
-- Model tools: `get_goal`, `create_goal`, `update_goal`.
-- Runtime continuation: active goals automatically enqueue follow-up turns until completed, paused, cleared, or budget-limited.
-- Budget accounting: approximate token usage plus elapsed active-turn time; optional `--tokens` budget triggers a budget-limited wrap-up prompt.
-
-## Usage
-
-```text
-/goal ship the new auth flow --tokens 50000
-/goal status
-/goal pause
-/goal resume
-/goal clear
-```
-
-The model can mark completion only by calling `update_goal({ "status": "complete" })` after auditing the objective against real evidence.
