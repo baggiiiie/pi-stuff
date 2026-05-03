@@ -1,0 +1,14 @@
+{
+  "name": "@baggiiiie/pi-goal",
+  "version": "0.0.1",
+  "type": "module",
+  "files": ["src", "README.md", "LICENSE"],
+  "keywords": ["pi-package"],
+  "pi": {
+    "extensions": ["./src/index.ts"]
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-ai": "*",
+    "@mariozechner/pi-coding-agent": "*"
+  }
+}
