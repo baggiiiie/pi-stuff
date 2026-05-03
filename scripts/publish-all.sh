@@ -18,14 +18,20 @@ fi
 
 EXTRA_ARGS=("$@")
 HAS_ACCESS_FLAG=false
-for arg in "${EXTRA_ARGS[@]}"; do
-  if [ "$arg" = "--access" ]; then
-    HAS_ACCESS_FLAG=true
-    break
-  fi
-done
+if [ "$#" -gt 0 ]; then
+  for arg in "${EXTRA_ARGS[@]}"; do
+    if [ "$arg" = "--access" ]; then
+      HAS_ACCESS_FLAG=true
+      break
+    fi
+  done
+fi
 if [ "$HAS_ACCESS_FLAG" = false ]; then
-  EXTRA_ARGS=(--access public "${EXTRA_ARGS[@]}")
+  if [ "${#EXTRA_ARGS[@]}" -gt 0 ]; then
+    EXTRA_ARGS=(--access public "${EXTRA_ARGS[@]}")
+  else
+    EXTRA_ARGS=(--access public)
+  fi
 fi
 
 if [ -n "${NPM_TOKEN:-}" ]; then
@@ -43,7 +49,10 @@ EOF
   echo >&2
 fi
 
-mapfile -t PACKAGE_DIRS < <(find packages -mindepth 1 -maxdepth 1 -type d | sort)
+PACKAGE_DIRS=()
+while IFS= read -r line; do
+  PACKAGE_DIRS+=("$line")
+done < <(find packages -mindepth 1 -maxdepth 1 -type d | sort)
 
 if [ "${#PACKAGE_DIRS[@]}" -eq 0 ]; then
   echo "No package directories found under packages/" >&2
