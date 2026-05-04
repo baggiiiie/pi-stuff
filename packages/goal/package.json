@@ -1,6 +1,6 @@
 {
   "name": "@baggiiiie/pi-goal",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Codex-style persisted goals for pi coding agent sessions.",
   "type": "module",
   "license": "MIT",
@@ -13,10 +13,22 @@
     "url": "https://github.com/baggiiiie/pi-stuff/issues"
   },
   "homepage": "https://github.com/baggiiiie/pi-stuff/tree/main/packages/goal#readme",
-  "files": ["src", "README.md", "LICENSE"],
-  "keywords": ["pi-package", "pi", "codex", "goals", "agent"],
+  "files": [
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "pi-package",
+    "pi",
+    "codex",
+    "goals",
+    "agent"
+  ],
   "pi": {
-    "extensions": ["./src/index.ts"]
+    "extensions": [
+      "./src/index.ts"
+    ]
   },
   "peerDependencies": {
     "@mariozechner/pi-ai": "*",

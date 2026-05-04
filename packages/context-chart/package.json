@@ -1,11 +1,19 @@
 {
   "name": "@baggiiiie/pi-context-chart",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "type": "module",
-  "files": ["src", "README.md", "LICENSE"],
-  "keywords": ["pi-package"],
+  "files": [
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "pi-package"
+  ],
   "pi": {
-    "extensions": ["./src/index.ts"]
+    "extensions": [
+      "./src/index.ts"
+    ]
   },
   "peerDependencies": {
     "@mariozechner/pi-ai": "*",
