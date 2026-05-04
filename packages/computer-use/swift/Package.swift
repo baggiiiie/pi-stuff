@@ -1,10 +1,12 @@
 // swift-tools-version: 6.0
 import PackageDescription
 
-// Proof-of-concept: a tiny executable that uses trycua/cua's CuaDriverCore
-// for screenshot capture, replacing the `screencapture(1)` subprocess in
-// src/helper.swift. Once the pattern is proven for screenshots we'll port
-// the rest of the helper commands.
+// Compiled Swift binary backing the @baggiiiie/pi-computer-use Node
+// extension. Implements every computer-use subcommand (list_apps,
+// get_state, click, key, type, screenshot) using trycua/cua's
+// CuaDriverCore for screen capture and AppKit/ApplicationServices
+// directly for AX, input, and pasteboard work. Replaces the legacy
+// `/usr/bin/swift src/helper.swift` script-mode entry point.
 //
 // cua-driver does not yet publish plain semver tags (only "cua-driver-v*"),
 // so SwiftPM has to pin by revision.

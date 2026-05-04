@@ -1,6 +1,6 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 
-import { runCuaHelperAs, runHelper, runHelperAs } from "./ipc.ts";
+import { runHelper, runHelperAs } from "./ipc.ts";
 import {
     ClickParams,
     GetStateParams,
@@ -42,7 +42,7 @@ export function registerComputerUseMacosTools(pi: ExtensionAPI): void {
             "Capture the main macOS display as a PNG via the cua-driver-backed pi-helper binary. Requires Screen Recording permission and macOS 14+.",
         parameters: ScreenshotParams,
         async execute(_id: string, _p: ScreenshotArgs): Promise<ToolResult> {
-            const r = await runCuaHelperAs<ScreenshotResponse>(["screenshot"]);
+            const r = await runHelperAs<ScreenshotResponse>(["screenshot"]);
             return {
                 content: [
                     {
