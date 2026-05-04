@@ -1,0 +1,57 @@
+name: Publish changed packages
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Version bump for changed packages when local version equals npm version
+        required: true
+        default: patch
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+          - prepatch
+          - preminor
+          - premajor
+          - prerelease
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: https://registry.npmjs.org
+      - run: npm ci
+      - name: Publish changed packages
+        run: npm run publish:changed -- ${{ inputs.bump }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Commit version bumps and tag published packages
+        run: |
+          if ! git diff --quiet; then
+            git config user.name github-actions[bot]
+            git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+            git add package-lock.json packages/*/package.json
+            git commit -m "chore: publish changed packages"
+          fi
+
+          if [ -f .publish-tags ]; then
+            while IFS= read -r tag; do
+              [ -n "$tag" ] && git tag "$tag"
+            done < .publish-tags
+            rm .publish-tags
+            git push --follow-tags
+          else
+            git push
+          fi
