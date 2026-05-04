@@ -1,2 +1,7 @@
 .env
 node_modules/
+
+# SwiftPM build output
+.build/
+.swiftpm/
+Package.resolved
