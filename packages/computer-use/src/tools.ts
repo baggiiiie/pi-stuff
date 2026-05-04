@@ -1,20 +1,22 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 
-import { runHelper, runHelperAs } from "./ipc.ts";
+import { runCuaHelperAs, runHelper, runHelperAs } from "./ipc.ts";
 import {
     ClickParams,
     GetStateParams,
     ListAppsParams,
     PressKeyParams,
+    ScreenshotParams,
     TypeTextParams,
     type ClickArgs,
     type GetStateArgs,
     type ListAppsArgs,
     type PressKeyArgs,
+    type ScreenshotArgs,
     type TypeTextArgs,
 } from "./schemas.ts";
 import { getAppState } from "./app-state.ts";
-import type { ListAppsResponse, ToolResult } from "./types.ts";
+import type { ListAppsResponse, ScreenshotResponse, ToolResult } from "./types.ts";
 
 export function registerComputerUseMacosTools(pi: ExtensionAPI): void {
     pi.registerTool({
@@ -29,6 +31,27 @@ export function registerComputerUseMacosTools(pi: ExtensionAPI): void {
             return {
                 content: [{ type: "text", text }],
                 details: { apps: r.apps },
+            };
+        },
+    });
+
+    pi.registerTool({
+        name: "screenshot",
+        label: "Screenshot Main Display",
+        description:
+            "Capture the main macOS display as a PNG via the cua-driver-backed pi-helper binary. Requires Screen Recording permission and macOS 14+.",
+        parameters: ScreenshotParams,
+        async execute(_id: string, _p: ScreenshotArgs): Promise<ToolResult> {
+            const r = await runCuaHelperAs<ScreenshotResponse>(["screenshot"]);
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: `Captured ${r.width}x${r.height} @ ${r.scaleFactor}x`,
+                    },
+                    { type: "image", data: r.screenshotBase64, mimeType: "image/png" },
+                ],
+                details: { width: r.width, height: r.height, scaleFactor: r.scaleFactor },
             };
         },
     });

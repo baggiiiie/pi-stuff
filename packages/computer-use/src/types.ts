@@ -50,6 +50,13 @@ export interface WindowInfo {
     frame: Frame | null;
 }
 
+export interface ScreenshotResponse extends HelperOk {
+    screenshotBase64: string;
+    width: number;
+    height: number;
+    scaleFactor: number;
+}
+
 export interface AppState extends HelperOk {
     app: string;
     appName: string;

@@ -2,6 +2,8 @@ import { Type, type Static } from "typebox";
 
 export const ListAppsParams = Type.Object({});
 
+export const ScreenshotParams = Type.Object({});
+
 export const GetStateParams = Type.Object({
     app: Type.String({ description: "Bundle id, e.g. com.apple.Notes" }),
 });
@@ -48,6 +50,7 @@ export const TypeTextParams = Type.Object({
 });
 
 export type ListAppsArgs = Static<typeof ListAppsParams>;
+export type ScreenshotArgs = Static<typeof ScreenshotParams>;
 export type GetStateArgs = Static<typeof GetStateParams>;
 export type ClickArgs = Static<typeof ClickParams>;
 export type PressKeyArgs = Static<typeof PressKeyParams>;

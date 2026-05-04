@@ -6,29 +6,31 @@ import { promisify } from "node:util";
 import type { HelperOk, HelperResponse } from "./types.ts";
 
 const execFileAsync = promisify(execFile);
-const helper = path.join(path.dirname(fileURLToPath(import.meta.url)), "helper.swift");
+const here = path.dirname(fileURLToPath(import.meta.url));
+const helper = path.join(here, "helper.swift");
 
-// Must match JSON_SENTINEL in helper.swift.
+// Compiled Swift binary backed by trycua/cua's CuaDriverCore. Currently only
+// implements the `screenshot` subcommand; see swift/Sources/pi-helper/main.swift.
+// Requires macOS 14+ at runtime (cua-driver constraint).
+const cuaHelper = path.join(here, "..", "swift", ".build", "release", "pi-helper");
+
+// Must match JSON_SENTINEL in helper.swift / main.swift.
 const JSON_SENTINEL = "===PI_HELPER_JSON===";
-const SWIFT_BIN = "/usr/bin/swift"
+const SWIFT_BIN = "/usr/bin/swift";
 
 function isHelperResponse(v: unknown): v is HelperResponse {
     return typeof v === "object" && v !== null && typeof (v as { ok?: unknown }).ok === "boolean";
 }
 
 /**
- * Runs the Swift helper with the provided arguments and returns its validated JSON response.
+ * Parse a sentinel-delimited helper response from combined stdout/stderr.
  *
- * The helper may emit non-JSON output before the response, so this reads stdout after the
- * sentinel marker and parses that payload. Throws if the helper fails to emit the sentinel,
- * returns malformed JSON, reports an error, or produces an unexpected response shape.
+ * Helpers may emit non-JSON output before the sentinel (Swift logs, build
+ * noise, permission prompts). Everything after the last sentinel occurrence is
+ * treated as the JSON payload. Throws on missing sentinel, malformed JSON,
+ * unexpected shape, or `ok: false`.
  */
-export async function runHelper(args: string[]): Promise<HelperOk> {
-    const { stdout, stderr } = await execFileAsync(
-        SWIFT_BIN,
-        [helper, ...args],
-        { maxBuffer: 30 * 1024 * 1024, timeout: 60_000 },
-    );
+function parseHelperOutput(stdout: string, stderr: string): HelperOk {
     const idx = stdout.indexOf(JSON_SENTINEL);
     if (idx < 0) {
         throw new Error(
@@ -54,6 +56,39 @@ export async function runHelper(args: string[]): Promise<HelperOk> {
     return parsed;
 }
 
+/**
+ * Runs the legacy script-mode Swift helper (helper.swift) via `/usr/bin/swift`
+ * and returns its validated JSON response.
+ */
+export async function runHelper(args: string[]): Promise<HelperOk> {
+    const { stdout, stderr } = await execFileAsync(
+        SWIFT_BIN,
+        [helper, ...args],
+        { maxBuffer: 30 * 1024 * 1024, timeout: 60_000 },
+    );
+    return parseHelperOutput(stdout, stderr);
+}
+
 export async function runHelperAs<T extends HelperOk>(args: string[]): Promise<T> {
     return (await runHelper(args)) as T;
+}
+
+/**
+ * Runs the compiled Swift binary (swift/.build/release/pi-helper, built from
+ * Sources/pi-helper/main.swift on top of trycua/cua's CuaDriverCore) and returns
+ * its validated JSON response. Same sentinel/payload protocol as runHelper.
+ *
+ * Run `npm run build:swift -w @baggiiiie/pi-computer-use` to produce the binary.
+ */
+export async function runCuaHelper(args: string[]): Promise<HelperOk> {
+    const { stdout, stderr } = await execFileAsync(
+        cuaHelper,
+        args,
+        { maxBuffer: 30 * 1024 * 1024, timeout: 60_000 },
+    );
+    return parseHelperOutput(stdout, stderr);
+}
+
+export async function runCuaHelperAs<T extends HelperOk>(args: string[]): Promise<T> {
+    return (await runCuaHelper(args)) as T;
 }

@@ -7,6 +7,10 @@
   "pi": {
     "extensions": ["./src/index.ts"]
   },
+  "scripts": {
+    "build:swift": "swift build -c release --package-path swift",
+    "build": "npm run build:swift"
+  },
   "peerDependencies": {
     "@mariozechner/pi-coding-agent": "*"
   }
