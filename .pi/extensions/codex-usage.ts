@@ -1,1 +1,1 @@
-export { default } from "../../packages/codex-usage/src/index.ts";
+export { default } from "../../packages/codex-usage/src/codex-usage.ts";

@@ -1,0 +1,13 @@
+{
+  "name": "@baggiiiie/pi-headroom",
+  "version": "0.0.1",
+  "type": "module",
+  "files": ["src", "README.md"],
+  "keywords": ["pi-package", "headroom", "context-compression"],
+  "pi": {
+    "extensions": ["./src/headroom.ts"]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  }
+}

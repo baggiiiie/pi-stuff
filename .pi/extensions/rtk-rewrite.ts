@@ -1,1 +1,1 @@
-export { default } from "../../packages/rtk-rewrite/src/index.ts";
+export { default } from "../../packages/rtk-rewrite/src/rtk-rewrite.ts";

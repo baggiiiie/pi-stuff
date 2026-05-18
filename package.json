@@ -1,7 +1,7 @@
 {
     "name": "pi-stuff",
     "private": true,
-    "version": "0.0.1",
+    "version": "0.0.2",
     "type": "module",
     "workspaces": [
         "packages/*"
@@ -21,6 +21,7 @@
     },
     "scripts": {
         "publish:all": "./scripts/publish-all.sh",
-        "publish:changed": "node ./scripts/publish-changed.js"
+        "publish:changed": "node ./scripts/publish-changed.js",
+        "publish:lazy-load": "./scripts/publish-lazy-load.sh"
     }
 }
