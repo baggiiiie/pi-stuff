@@ -18,12 +18,7 @@ That usually cuts token-heavy shell output by a lot, especially for `git`, `rg`,
 
 ## Install
 
-```bash
-pi install /path/to/pi-stuff/packages/rtk-rewrite
-```
-
-Or after publishing:
-
+Install from npm:
 ```bash
 pi install npm:@baggiiiie/pi-rtk-rewrite
 ```

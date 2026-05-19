@@ -7,12 +7,7 @@ A minimal pi package that keeps `bash` tool output cleaner for the model by:
 
 ## Install
 
-```bash
-pi install /path/to/pi-stuff/packages/no-ansi
-```
-
-Or after publishing:
-
+Install from npm:
 ```bash
 pi install npm:@baggiiiie/pi-no-ansi
 ```

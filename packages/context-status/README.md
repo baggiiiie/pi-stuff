@@ -4,12 +4,7 @@ A pi package that shows current context-window usage in the status line or a cus
 
 ## Install
 
-```bash
-pi install /path/to/pi-stuff/packages/context-status
-```
-
-Or after publishing:
-
+Install from npm:
 ```bash
 pi install npm:@baggiiiie/pi-context-status
 ```

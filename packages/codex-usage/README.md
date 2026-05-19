@@ -4,12 +4,7 @@ A pi package that adds the `/codex-usage` command and status widget.
 
 ## Install
 
-```bash
-pi install /path/to/pi-stuff/packages/codex-usage
-```
-
-Or after publishing:
-
+Install from npm:
 ```bash
 pi install npm:@baggiiiie/pi-codex-usage
 ```
