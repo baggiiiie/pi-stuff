@@ -1,6 +1,6 @@
 {
   "name": "@baggiiiie/pi-context-chart",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "type": "module",
   "files": [
     "src",
@@ -17,6 +17,7 @@
   },
   "peerDependencies": {
     "@mariozechner/pi-ai": "*",
-    "@mariozechner/pi-coding-agent": "*"
+    "@mariozechner/pi-coding-agent": "*",
+    "@mariozechner/pi-tui": "*"
   }
 }

@@ -1,127 +1,151 @@
-import { execFileSync } from "node:child_process";
-import { existsSync } from "node:fs";
-import { createRequire } from "node:module";
-import path from "node:path";
-import { pathToFileURL } from "node:url";
-import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
-import { buildRecordedSnapshots, buildLiveSnapshot, buildPayload, type Snapshot, type ChartPayload } from "./data.ts";
-import { renderHtml } from "./ui.ts";
+import type { ContextEvent, ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
+import { openChartWindow, type ChartWindow } from "./chart.ts";
+import {
+	buildChartPayload,
+	buildFooterViewModel,
+	computeSharedState,
+	type SharedState,
+} from "./data.ts";
+import { buildFooterLines } from "./footer.ts";
 
-const WINDOW_TITLE = "Session Context Usage";
-const require = createRequire(import.meta.url);
-let cachedGlimpsePath: string | null = null;
-
-function run(command: string, args: string[]): string | null {
-	try {
-		return execFileSync(command, args, {
-			encoding: "utf8",
-			stdio: ["ignore", "pipe", "ignore"],
-		}).trim();
-	} catch {
-		return null;
-	}
-}
-
-function resolveGlimpsePath(): string {
-	if (cachedGlimpsePath) return cachedGlimpsePath;
-
-	const envPath = process.env.GLIMPSE_PATH;
-	if (envPath && existsSync(envPath)) {
-		cachedGlimpsePath = envPath;
-		return cachedGlimpsePath;
-	}
-
-	for (const specifier of ["glimpseui", "glimpseui/src/glimpse.mjs"]) {
-		try {
-			const resolved = require.resolve(specifier);
-			if (existsSync(resolved)) {
-				cachedGlimpsePath = resolved;
-				return cachedGlimpsePath;
-			}
-		} catch {
-			// Try the next strategy.
-		}
-	}
-
-	const globalNodeModulesDirs = new Set<string>();
-	const npmPrefix = process.env.npm_config_prefix ?? process.env.PREFIX;
-	if (npmPrefix) {
-		globalNodeModulesDirs.add(path.join(npmPrefix, "node_modules"));
-		globalNodeModulesDirs.add(path.join(npmPrefix, "lib", "node_modules"));
-	}
-
-	const nodePath = process.env.NODE_PATH;
-	if (nodePath) {
-		for (const dir of nodePath.split(path.delimiter)) {
-			if (dir) globalNodeModulesDirs.add(dir);
-		}
-	}
-
-	const npmRoot = run("npm", ["root", "-g"]);
-	if (npmRoot) globalNodeModulesDirs.add(npmRoot);
-
-	const pnpmRoot = run("pnpm", ["root", "-g"]);
-	if (pnpmRoot) globalNodeModulesDirs.add(pnpmRoot);
-
-	const yarnGlobalDir = run("yarn", ["global", "dir"]);
-	if (yarnGlobalDir) globalNodeModulesDirs.add(path.join(yarnGlobalDir, "node_modules"));
-
-	for (const dir of globalNodeModulesDirs) {
-		const candidate = path.join(dir, "glimpseui", "src", "glimpse.mjs");
-		if (existsSync(candidate)) {
-			cachedGlimpsePath = candidate;
-			return cachedGlimpsePath;
-		}
-	}
-
-	throw new Error(
-		"Could not find Glimpse. Install `glimpseui` where Node can resolve it, or set GLIMPSE_PATH to .../glimpseui/src/glimpse.mjs.",
-	);
-}
-
-type GlimpseWindow = {
-	on(event: "ready", handler: () => void): void;
-	on(event: "closed", handler: () => void): void;
-	send(js: string): void;
-	close(): void;
-};
+const KEY = "context-chart";
 
 export default function (pi: ExtensionAPI) {
-	let recordedSnapshots: Snapshot[] = [];
-	let liveSnapshot: Snapshot | null = null;
-	let windowRef: GlimpseWindow | null = null;
-	let windowReady = false;
-	let lastPayload: ChartPayload | null = null;
+	let state: SharedState | null = null;
+	let footerEnabled = readFooterDefault(process.env.PI_CONTEXT_CHART_FOOTER);
+	let footerRegistered = false;
+	let chartWindow: ChartWindow | null = null;
+	let tuiRef: { requestRender(): void } | null = null;
 
-	pi.registerCommand("context-chart", {
-		description: "Open a live context usage chart in Glimpse",
+	function ensureState(ctx: ExtensionContext, event?: ContextEvent): SharedState {
+		if (!state) state = computeSharedState(ctx, event);
+		return state;
+	}
+
+	function refresh(ctx: ExtensionContext, event?: ContextEvent) {
+		state = computeSharedState(ctx, event);
+		if (chartWindow) chartWindow.publish(buildChartPayload(state, ctx));
+		if (footerRegistered && tuiRef) tuiRef.requestRender();
+	}
+
+	function registerFooter(ctx: ExtensionContext) {
+		if (footerRegistered) return;
+		footerRegistered = true;
+		ctx.ui.setFooter((tui, theme, footerData) => {
+			tuiRef = tui;
+			const unsub = footerData.onBranchChange(() => tui.requestRender());
+			return {
+				dispose: () => {
+					unsub();
+					tuiRef = null;
+				},
+				invalidate() {},
+				render(width: number): string[] {
+					const s = ensureState(ctx);
+					return buildFooterLines(width, theme, footerData, ctx, buildFooterViewModel(s), KEY);
+				},
+			};
+		});
+	}
+
+	function unregisterFooter(ctx: ExtensionContext) {
+		if (!footerRegistered) return;
+		footerRegistered = false;
+		ctx.ui.setFooter(undefined);
+		tuiRef = null;
+	}
+
+	async function openChart(ctx: ExtensionContext) {
+		const s = ensureState(ctx);
+		const payload = buildChartPayload(s, ctx);
+		if (chartWindow) {
+			chartWindow.publish(payload);
+			return;
+		}
+		chartWindow = await openChartWindow(payload, () => {
+			chartWindow = null;
+		});
+	}
+
+	function closeChart() {
+		if (chartWindow) {
+			chartWindow.close();
+			chartWindow = null;
+		}
+	}
+
+	pi.registerCommand(KEY, {
+		description: "Open a live context usage chart in Glimpse and/or toggle the context footer",
 		handler: async (args, ctx) => {
 			const command = args.trim().toLowerCase();
 
-			if (command === "close") {
-				closeWindow();
-				ctx.ui.notify("Context chart closed", "info");
-				return;
-			}
-
-			recordedSnapshots = buildRecordedSnapshots(ctx);
-			liveSnapshot = null;
-
-			try {
-				await openOrRefreshWindow(ctx);
-				ctx.ui.notify("Context chart opened", "info");
-			} catch (error) {
-				const message = error instanceof Error ? error.message : String(error);
-				ctx.ui.notify(`Failed to open context chart: ${message}`, "info");
+			switch (command) {
+				case "": {
+					try {
+						await openChart(ctx);
+						ctx.ui.notify("Context chart opened", "info");
+					} catch (error) {
+						const message = error instanceof Error ? error.message : String(error);
+						ctx.ui.notify(`Failed to open context chart: ${message}`, "info");
+					}
+					return;
+				}
+				case "close":
+					if (chartWindow) {
+						closeChart();
+						ctx.ui.notify("Context chart closed", "info");
+					} else {
+						ctx.ui.notify("Context chart is not open", "info");
+					}
+					return;
+				case "footer":
+					footerEnabled = !footerEnabled;
+					if (footerEnabled) {
+						registerFooter(ctx);
+						ctx.ui.notify("Context footer enabled", "info");
+					} else {
+						unregisterFooter(ctx);
+						ctx.ui.notify("Context footer disabled", "info");
+					}
+					return;
+				case "refresh":
+					refresh(ctx);
+					ctx.ui.notify("Context refreshed", "info");
+					return;
+				case "help":
+					showHelp(ctx);
+					return;
+				case "clear":
+					ctx.ui.setWidget(KEY, undefined);
+					return;
+				default:
+					ctx.ui.notify(`Unknown subcommand: ${args.trim()}. Try /context-chart help`, "info");
 			}
 		},
 	});
 
-	async function handleSessionUpdate(_event: unknown, ctx: ExtensionContext) {
-		recordedSnapshots = buildRecordedSnapshots(ctx);
-		liveSnapshot = null;
-		await publish(ctx);
+	function showHelp(ctx: ExtensionContext) {
+		ctx.ui.setWidget(KEY, [
+			"/context-chart",
+			"",
+			"Commands:",
+			"  /context-chart           Open the live context usage chart",
+			"  /context-chart close     Close the chart window",
+			"  /context-chart footer    Toggle the context footer on/off",
+			"  /context-chart refresh   Recompute context state (updates chart + footer)",
+			"  /context-chart help      Show this help widget",
+			"  /context-chart clear     Hide this help widget",
+			"",
+			`Footer: ${footerEnabled ? "on" : "off"}`,
+			`Chart:  ${chartWindow ? "open" : "closed"}`,
+			`Startup footer env: PI_CONTEXT_CHART_FOOTER=${process.env.PI_CONTEXT_CHART_FOOTER ?? "on"}`,
+		]);
 	}
+
+	const handleSessionUpdate = (_event: unknown, ctx: ExtensionContext) => {
+		if (footerEnabled) registerFooter(ctx);
+		refresh(ctx);
+	};
 
 	pi.on("session_start", handleSessionUpdate);
 	pi.on("session_switch", handleSessionUpdate);
@@ -129,62 +153,22 @@ export default function (pi: ExtensionAPI) {
 	pi.on("session_compact", handleSessionUpdate);
 	pi.on("session_tree", handleSessionUpdate);
 	pi.on("turn_end", handleSessionUpdate);
+	pi.on("model_select", handleSessionUpdate);
 
-	pi.on("model_select", async (_event, ctx) => {
-		await publish(ctx);
+	pi.on("context", (event: ContextEvent, ctx) => {
+		refresh(ctx, event);
 	});
 
-	pi.on("context", async (event, ctx) => {
-		liveSnapshot = buildLiveSnapshot(event, ctx);
-		await publish(ctx);
+	pi.on("session_shutdown", (_event, ctx) => {
+		state = null;
+		closeChart();
+		unregisterFooter(ctx);
+		ctx.ui.setWidget(KEY, undefined);
 	});
+}
 
-	pi.on("session_shutdown", async () => {
-		closeWindow();
-	});
-
-	function closeWindow() {
-		if (windowRef) {
-			windowRef.close();
-		}
-		windowRef = null;
-		windowReady = false;
-	}
-
-	async function openOrRefreshWindow(ctx: ExtensionContext) {
-		if (!windowRef) {
-			const glimpsePath = resolveGlimpsePath();
-			const { open } = await import(pathToFileURL(glimpsePath).href);
-			lastPayload = buildPayload(ctx, recordedSnapshots, liveSnapshot);
-			const win = open(renderHtml(lastPayload), {
-				width: 1280,
-				height: 760,
-				title: WINDOW_TITLE,
-			});
-
-			windowRef = win as GlimpseWindow;
-			windowReady = false;
-
-			windowRef.on("ready", () => {
-				windowReady = true;
-				if (lastPayload && windowRef) {
-					windowRef.send(`window.updateChart(${JSON.stringify(lastPayload)})`);
-				}
-			});
-
-			windowRef.on("closed", () => {
-				windowRef = null;
-				windowReady = false;
-			});
-			return;
-		}
-
-		await publish(ctx);
-	}
-
-	async function publish(ctx: ExtensionContext) {
-		lastPayload = buildPayload(ctx, recordedSnapshots, liveSnapshot);
-		if (!windowRef || !windowReady) return;
-		windowRef.send(`window.updateChart(${JSON.stringify(lastPayload)})`);
-	}
+function readFooterDefault(value: string | undefined): boolean {
+	const normalized = value?.trim().toLowerCase();
+	if (normalized === "off" || normalized === "false" || normalized === "0") return false;
+	return true;
 }

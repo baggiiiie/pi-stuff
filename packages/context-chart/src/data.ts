@@ -3,6 +3,7 @@ import {
 	buildSessionContext,
 	estimateTokens,
 	type ContextEvent,
+	type ContextUsage,
 	type ExtensionContext,
 	type SessionEntry,
 } from "@mariozechner/pi-coding-agent";
@@ -32,12 +33,21 @@ export type Snapshot = {
 	toolDetails?: ToolDetail[];
 };
 
-export type UsageSummary = {
+export type UsageTotals = {
 	input: number;
 	output: number;
 	cacheRead: number;
 	cacheWrite: number;
 	cost: number;
+};
+
+export type SharedState = {
+	recordedSnapshots: Snapshot[];
+	liveSnapshot: Snapshot | null;
+	currentSnapshot: Snapshot;
+	usage: UsageTotals;
+	contextUsage: ContextUsage | undefined;
+	contextWindow: number | null;
 };
 
 export type ChartPayload = {
@@ -49,12 +59,103 @@ export type ChartPayload = {
 		contextWindow: number | null;
 		currentTotal: number;
 		currentPercent: number | null;
-		usage: UsageSummary;
+		usage: UsageTotals;
 		updatedAt: number;
 	};
 };
 
-export function buildRecordedSnapshots(ctx: ExtensionContext): Snapshot[] {
+export type FooterBreakdown = {
+	systemInstructions: number;
+	userInput: number;
+	agentOutput: number;
+	tools: number;
+	memory: number;
+	total: number;
+	turns: number;
+	approximate: boolean;
+	source: "recorded" | "live";
+};
+
+export type FooterViewModel = {
+	contextUsage: ContextUsage | undefined;
+	contextWindow: number | null;
+	tokens: number | null;
+	percent: number | null;
+	breakdown: FooterBreakdown;
+	usage: UsageTotals;
+};
+
+export function computeSharedState(ctx: ExtensionContext, event?: ContextEvent): SharedState {
+	const recordedSnapshots = buildRecordedSnapshots(ctx);
+	const liveSnapshot = event ? buildLiveSnapshot(event, ctx) : null;
+	const currentSnapshot = buildCurrentContextSnapshot(ctx);
+	const usage = collectUsage(ctx);
+	const contextUsage = ctx.getContextUsage();
+	const contextWindow = contextUsage?.contextWindow ?? ctx.model?.contextWindow ?? null;
+	return { recordedSnapshots, liveSnapshot, currentSnapshot, usage, contextUsage, contextWindow };
+}
+
+export function buildChartPayload(state: SharedState, ctx: ExtensionContext): ChartPayload {
+	const points = mergeSnapshots(state.recordedSnapshots, state.liveSnapshot);
+	const current = state.liveSnapshot ?? state.currentSnapshot;
+	const currentPercent =
+		state.contextWindow && current.total > 0 ? (current.total / state.contextWindow) * 100 : null;
+
+	return {
+		points,
+		meta: {
+			model: ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : null,
+			sessionName: ctx.sessionManager.getSessionName() ?? null,
+			sessionFile: ctx.sessionManager.getSessionFile() ?? null,
+			contextWindow: state.contextWindow,
+			currentTotal: current.total,
+			currentPercent,
+			usage: state.usage,
+			updatedAt: Date.now(),
+		},
+	};
+}
+
+export function buildFooterViewModel(state: SharedState): FooterViewModel {
+	const estimated = state.liveSnapshot ?? state.currentSnapshot;
+	const canTrustUsage = !state.liveSnapshot && typeof state.contextUsage?.tokens === "number";
+	const actualTokens = canTrustUsage ? state.contextUsage?.tokens ?? null : null;
+	const tokens = actualTokens ?? estimated.total;
+	const percent = canTrustUsage
+		? state.contextUsage?.percent ??
+		  (state.contextWindow && actualTokens !== null ? (actualTokens / state.contextWindow) * 100 : null)
+		: state.contextWindow && tokens > 0
+			? (tokens / state.contextWindow) * 100
+			: null;
+
+	const breakdown: FooterBreakdown = {
+		systemInstructions: estimated.systemInstructions,
+		userInput: estimated.userInput,
+		agentOutput: estimated.agentOutput,
+		tools: estimated.tools,
+		memory: estimated.memory,
+		total: estimated.total,
+		turns: countTurns(state),
+		approximate: !canTrustUsage,
+		source: estimated.source,
+	};
+
+	return {
+		contextUsage: state.contextUsage,
+		contextWindow: state.contextWindow,
+		tokens,
+		percent,
+		breakdown: scaleBreakdownToTotal(breakdown, tokens),
+		usage: state.usage,
+	};
+}
+
+function countTurns(state: SharedState): number {
+	const recorded = state.recordedSnapshots.length;
+	return state.liveSnapshot ? recorded + 1 : recorded;
+}
+
+function buildRecordedSnapshots(ctx: ExtensionContext): Snapshot[] {
 	const branch = ctx.sessionManager.getBranch();
 	const entries = ctx.sessionManager.getEntries() as SessionEntry[];
 	const byId = new Map(entries.map((entry) => [entry.id, entry]));
@@ -86,7 +187,7 @@ export function buildRecordedSnapshots(ctx: ExtensionContext): Snapshot[] {
 	return snapshots;
 }
 
-export function buildLiveSnapshot(event: ContextEvent, ctx: ExtensionContext): Snapshot {
+function buildLiveSnapshot(event: ContextEvent, ctx: ExtensionContext): Snapshot {
 	const branch = ctx.sessionManager.getBranch();
 	const nextTurn = countAssistantMessages(branch) + 1;
 	const snapshot = buildSnapshot(event.messages, ctx.getSystemPrompt() ?? "", nextTurn, "live");
@@ -102,28 +203,6 @@ export function buildLiveSnapshot(event: ContextEvent, ctx: ExtensionContext): S
 	snapshot.summary = buildTurnSummary(lastUserText, []);
 
 	return snapshot;
-}
-
-export function buildPayload(ctx: ExtensionContext, recordedSnapshots: Snapshot[], liveSnapshot: Snapshot | null): ChartPayload {
-	const points = mergeSnapshots(recordedSnapshots, liveSnapshot);
-	const usage = collectUsage(ctx);
-	const current = liveSnapshot ?? buildCurrentContextSnapshot(ctx);
-	const contextWindow = ctx.model?.contextWindow ?? null;
-	const currentPercent = contextWindow && current.total > 0 ? (current.total / contextWindow) * 100 : null;
-
-	return {
-		points,
-		meta: {
-			model: ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : null,
-			sessionName: ctx.sessionManager.getSessionName() ?? null,
-			sessionFile: ctx.sessionManager.getSessionFile() ?? null,
-			contextWindow,
-			currentTotal: current.total,
-			currentPercent,
-			usage,
-			updatedAt: Date.now(),
-		},
-	};
 }
 
 function buildCurrentContextSnapshot(ctx: ExtensionContext): Snapshot {
@@ -190,9 +269,8 @@ function mergeSnapshots(recorded: Snapshot[], live: Snapshot | null): Snapshot[]
 	return merged.sort((a, b) => a.turn - b.turn);
 }
 
-function collectUsage(ctx: ExtensionContext): UsageSummary {
-	const usage: UsageSummary = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 };
-
+function collectUsage(ctx: ExtensionContext): UsageTotals {
+	const usage: UsageTotals = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 };
 	for (const entry of ctx.sessionManager.getBranch()) {
 		if (entry.type !== "message" || entry.message.role !== "assistant") continue;
 		const message = entry.message as AssistantMessage;
@@ -202,7 +280,6 @@ function collectUsage(ctx: ExtensionContext): UsageSummary {
 		usage.cacheWrite += message.usage?.cacheWrite ?? 0;
 		usage.cost += message.usage?.cost?.total ?? 0;
 	}
-
 	return usage;
 }
 
@@ -212,6 +289,38 @@ function countAssistantMessages(entries: SessionEntry[]): number {
 		if (entry.type === "message" && entry.message.role === "assistant") count += 1;
 	}
 	return count;
+}
+
+function scaleBreakdownToTotal(breakdown: FooterBreakdown, targetTotal: number | null): FooterBreakdown {
+	if (targetTotal === null || targetTotal < 0 || breakdown.total <= 0) return breakdown;
+	if (breakdown.total === targetTotal) return breakdown;
+
+	const fields = [
+		{ key: "systemInstructions", value: breakdown.systemInstructions },
+		{ key: "userInput", value: breakdown.userInput },
+		{ key: "agentOutput", value: breakdown.agentOutput },
+		{ key: "tools", value: breakdown.tools },
+		{ key: "memory", value: breakdown.memory },
+	] as const;
+
+	const scaled = fields.map((field) => {
+		const raw = (field.value / breakdown.total) * targetTotal;
+		const value = Math.floor(raw);
+		return { key: field.key, value, remainder: raw - value };
+	});
+
+	let assigned = scaled.reduce((sum, field) => sum + field.value, 0);
+	for (const field of [...scaled].sort((a, b) => b.remainder - a.remainder)) {
+		if (assigned >= targetTotal) break;
+		field.value += 1;
+		assigned += 1;
+	}
+
+	const next = { ...breakdown, total: targetTotal };
+	for (const field of scaled) {
+		(next as unknown as Record<string, number>)[field.key] = field.value;
+	}
+	return next;
 }
 
 function estimateTextTokens(text: string): number {
@@ -324,4 +433,13 @@ function buildTurnSummary(userText: string, toolNames: string[]): string {
 		parts.push(toolNames.join(", "));
 	}
 	return parts.join(" · ");
+}
+
+export function formatTokens(count: number): string {
+	if (!Number.isFinite(count)) return "?";
+	if (count < 1000) return `${Math.round(count)}`;
+	if (count < 10_000) return `${(count / 1000).toFixed(1)}k`;
+	if (count < 1_000_000) return `${Math.round(count / 1000)}k`;
+	if (count < 10_000_000) return `${(count / 1_000_000).toFixed(1)}M`;
+	return `${Math.round(count / 1_000_000)}M`;
 }
