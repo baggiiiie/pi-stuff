@@ -32,10 +32,8 @@ export function buildFooterLines(
 	const rightStats = buildModelLabel(ctx, footerData.getAvailableProviderCount(), theme);
 	lines.push(joinLeftRight(leftStats, rightStats, width));
 
-	const summaryPrefix = theme.fg("accent", "Context ");
-	const summaryBody = theme.fg("dim", formatHeadline(view));
-	const summaryLegend = renderLegend(view.breakdown, theme);
-	const summary = [summaryPrefix + summaryBody, summaryLegend].filter(Boolean).join(theme.fg("dim", " • "));
+	const summaryLegend = renderLegend(view.breakdown, view.usage, theme);
+	const summary = [summaryLegend].filter(Boolean).join(theme.fg("dim", " • "));
 	lines.push(truncateToWidth(summary, width, theme.fg("dim", "...")));
 
 	const barLabel = theme.fg("dim", `${view.breakdown.approximate ? "Estimated" : "Current"} mix `);
@@ -85,15 +83,26 @@ function joinLeftRight(left: string, right: string, width: number): string {
 	return truncatedLeft + padding + right;
 }
 
-function renderLegend(breakdown: FooterBreakdown, theme: Theme): string {
+function renderLegend(breakdown: FooterBreakdown, usage: UsageTotals, theme: Theme): string {
 	const entries = [
 		colorizedToken(theme, "warning", "System ", breakdown.systemInstructions),
 		colorizedToken(theme, "accent", "User ", breakdown.userInput),
 		colorizedToken(theme, "success", "Agent ", breakdown.agentOutput),
 		colorizedToken(theme, "error", "Tools ", breakdown.tools),
-		colorizedToken(theme, "muted", "Carried context ", breakdown.memory),
+		colorizedToken(theme, "muted", "Carried Context ", breakdown.memory),
+		buildCacheLabel(usage, theme),
 	];
 	return entries.join(theme.fg("dim", " • "));
+}
+
+function buildCacheLabel(usage: UsageTotals, theme: Theme): string {
+	const promptTokens = usage.input + usage.cacheRead + usage.cacheWrite;
+	if (promptTokens <= 0) return theme.fg("dim", "Cache --");
+	const rate = usage.cacheRead / promptTokens;
+	const label = `Cache ${(rate * 100).toFixed(1)}%`;
+	if (rate >= 0.7) return theme.fg("success", label);
+	if (rate >= 0.3) return theme.fg("warning", label);
+	return theme.fg("dim", label);
 }
 
 function renderBar(view: FooterViewModel, theme: Theme, width: number): string {

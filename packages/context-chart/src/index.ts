@@ -1,9 +1,11 @@
-import type { ContextEvent, ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
+import type { AssistantMessage } from "@mariozechner/pi-ai";
+import type { ContextEvent, ExtensionAPI, ExtensionContext, SessionEntry } from "@mariozechner/pi-coding-agent";
 import { openChartWindow, type ChartWindow } from "./chart.ts";
 import {
 	buildChartPayload,
 	buildFooterViewModel,
 	computeSharedState,
+	formatTokens,
 	type SharedState,
 } from "./data.ts";
 import { buildFooterLines } from "./footer.ts";
@@ -112,6 +114,9 @@ export default function (pi: ExtensionAPI) {
 					refresh(ctx);
 					ctx.ui.notify("Context refreshed", "info");
 					return;
+				case "prompt-cache":
+					showPromptCache(ctx);
+					return;
 				case "help":
 					showHelp(ctx);
 					return;
@@ -124,17 +129,23 @@ export default function (pi: ExtensionAPI) {
 		},
 	});
 
+	function showPromptCache(ctx: ExtensionContext) {
+		const view = buildPromptCacheViewModel(ctx);
+		ctx.ui.setWidget(KEY, buildPromptCacheWidgetLines(view));
+	}
+
 	function showHelp(ctx: ExtensionContext) {
 		ctx.ui.setWidget(KEY, [
 			"/context-chart",
 			"",
 			"Commands:",
-			"  /context-chart           Open the live context usage chart",
-			"  /context-chart close     Close the chart window",
-			"  /context-chart footer    Toggle the context footer on/off",
-			"  /context-chart refresh   Recompute context state (updates chart + footer)",
-			"  /context-chart help      Show this help widget",
-			"  /context-chart clear     Hide this help widget",
+			"  /context-chart              Open the live context usage chart",
+			"  /context-chart close        Close the chart window",
+			"  /context-chart footer       Toggle the context footer on/off",
+			"  /context-chart prompt-cache  Show prompt cache hit rate stats",
+			"  /context-chart refresh      Recompute context state (updates chart + footer)",
+			"  /context-chart help         Show this help widget",
+			"  /context-chart clear        Hide this help widget",
 			"",
 			`Footer: ${footerEnabled ? "on" : "off"}`,
 			`Chart:  ${chartWindow ? "open" : "closed"}`,
@@ -171,4 +182,71 @@ function readFooterDefault(value: string | undefined): boolean {
 	const normalized = value?.trim().toLowerCase();
 	if (normalized === "off" || normalized === "false" || normalized === "0") return false;
 	return true;
+}
+
+type CacheUsageTotals = {
+	input: number;
+	output: number;
+	cacheRead: number;
+	cacheWrite: number;
+	cost: number;
+	turns: number;
+};
+
+type PromptCacheViewModel = {
+	total: CacheUsageTotals;
+	last?: CacheUsageTotals;
+};
+
+function buildPromptCacheViewModel(ctx: ExtensionContext): PromptCacheViewModel {
+	const total: CacheUsageTotals = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, turns: 0 };
+	let last: CacheUsageTotals | undefined;
+
+	for (const entry of ctx.sessionManager.getBranch() as SessionEntry[]) {
+		if (entry.type !== "message" || entry.message.role !== "assistant") continue;
+		const message = entry.message as AssistantMessage;
+		const usage: CacheUsageTotals = {
+			input: message.usage?.input ?? 0,
+			output: message.usage?.output ?? 0,
+			cacheRead: message.usage?.cacheRead ?? 0,
+			cacheWrite: message.usage?.cacheWrite ?? 0,
+			cost: message.usage?.cost?.total ?? 0,
+			turns: 1,
+		};
+		total.input += usage.input;
+		total.output += usage.output;
+		total.cacheRead += usage.cacheRead;
+		total.cacheWrite += usage.cacheWrite;
+		total.cost += usage.cost;
+		total.turns += 1;
+		last = usage;
+	}
+
+	return { total, last };
+}
+
+function buildPromptCacheWidgetLines(view: PromptCacheViewModel): string[] {
+	return [
+		"Prompt cache hit rate",
+		"",
+		...formatCacheUsageBlock("Session", view.total),
+		"",
+		...(view.last ? formatCacheUsageBlock("Last assistant turn", view.last) : ["Last assistant turn: none"]),
+		"",
+		"Formula: cacheRead / (input + cacheRead + cacheWrite)",
+	];
+}
+
+function formatCacheUsageBlock(label: string, usage: CacheUsageTotals): string[] {
+	const promptTokens = usage.input + usage.cacheRead + usage.cacheWrite;
+	const rate = promptTokens > 0 ? usage.cacheRead / promptTokens : null;
+	return [
+		`${label}: ${rate === null ? "no cache token data" : `${(rate * 100).toFixed(1)}%`}`,
+		`  input:       ${formatTokens(usage.input)}`,
+		`  cache read:  ${formatTokens(usage.cacheRead)}`,
+		`  cache write: ${formatTokens(usage.cacheWrite)}`,
+		`  output:      ${formatTokens(usage.output)}`,
+		`  turns:       ${usage.turns}`,
+		`  cost:        $${usage.cost.toFixed(4)}`,
+	];
 }
