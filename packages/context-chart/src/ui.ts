@@ -4,6 +4,13 @@ const WINDOW_TITLE = "Session Context Usage";
 const SANS_FONT = 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
 const MONO_FONT = 'ui-monospace, "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", monospace';
 
+function safeJsonForScript(value: unknown): string {
+    return JSON.stringify(value)
+        .replace(/</g, "\\u003c")
+        .replace(/\u2028/g, "\\u2028")
+        .replace(/\u2029/g, "\\u2029");
+}
+
 export function renderHtml(initialPayload: ChartPayload): string {
     return `<!doctype html>
 <html>
@@ -546,7 +553,7 @@ export function renderHtml(initialPayload: ChartPayload): string {
 			arrow.textContent = open ? '▼' : '▶';
 		};
 
-		window.updateChart(${JSON.stringify(initialPayload)});
+		window.updateChart(${safeJsonForScript(initialPayload)});
 
 		// Cmd+/- zoom support
 		(function() {
