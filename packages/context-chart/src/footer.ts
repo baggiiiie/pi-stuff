@@ -36,7 +36,7 @@ export function buildFooterLines(
 	const summary = [summaryLegend].filter(Boolean).join(theme.fg("dim", " • "));
 	lines.push(truncateToWidth(summary, width, theme.fg("dim", "...")));
 
-	const barLabel = theme.fg("dim", `${view.breakdown.approximate ? "Estimated" : "Current"} mix `);
+	const barLabel = theme.fg("dim", "Context window");
 	const bar =
 		barLabel +
 		renderBar(view, theme, Math.max(10, Math.min(FOOTER_BAR_WIDTH, width - visibleWidth(barLabel) - 1)));
@@ -117,6 +117,7 @@ function renderBar(view: FooterViewModel, theme: Theme, width: number): string {
 	const empty = theme.fg("dim", "░".repeat(Math.max(0, width - filled)));
 
 	return [
+		theme.fg("dim", " "),
 		theme.fg("warning", "█".repeat(segments.systemInstructions)),
 		theme.fg("accent", "█".repeat(segments.userInput)),
 		theme.fg("success", "█".repeat(segments.agentOutput)),
