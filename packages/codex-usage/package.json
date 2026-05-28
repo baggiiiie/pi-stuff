@@ -12,7 +12,7 @@
   ],
   "pi": {
     "extensions": [
-      "./src/index.ts"
+      "./src/codex-usage.ts"
     ]
   },
   "peerDependencies": {

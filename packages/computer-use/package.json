@@ -5,7 +5,7 @@
   "files": ["src", "README.md", "LICENSE"],
   "keywords": ["pi-package"],
   "pi": {
-    "extensions": ["./src/index.ts"]
+    "extensions": ["./src/computer-use.ts"]
   },
   "scripts": {
     "build:swift": "swift build -c release --package-path swift",

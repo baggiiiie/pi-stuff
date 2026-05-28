@@ -27,7 +27,7 @@
   ],
   "pi": {
     "extensions": [
-      "./src/index.ts"
+      "./src/goal.ts"
     ]
   },
   "peerDependencies": {

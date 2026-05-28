@@ -5,7 +5,7 @@
   "files": ["src", "README.md"],
   "keywords": ["pi-package"],
   "pi": {
-    "extensions": ["./src/index.ts"]
+    "extensions": ["./src/notify.ts"]
   },
   "peerDependencies": {
     "@mariozechner/pi-coding-agent": "*"
