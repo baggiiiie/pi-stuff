@@ -44,9 +44,12 @@ Once installed, restart pi or run `/reload`.
 /rtk-rewrite status
 /rtk-rewrite on
 /rtk-rewrite off
+/rtk-rewrite reset
 /rtk-rewrite refresh
 /rtk-rewrite test git status
 ```
+
+`/rtk-rewrite on` and `/rtk-rewrite off` are global: they persist to `~/.pi/agent/rtk-rewrite.json` and apply to future pi sessions. `/rtk-rewrite reset` clears that override and falls back to the environment/default setting.
 
 ## Environment knobs
 

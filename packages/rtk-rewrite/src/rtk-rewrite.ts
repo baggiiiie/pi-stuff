@@ -1,10 +1,14 @@
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { isToolCallEventType } from "@mariozechner/pi-coding-agent";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { dirname, join } from "node:path";
 
 const KEY = "rtk-rewrite";
 const DEFAULT_TIMEOUT_MS = 2000;
 const MAX_CACHE_ENTRIES = 200;
 const LC_ALL_PREFIX = "export LC_ALL=C";
+const STATE_PATH = join(getAgentDir(), "rtk-rewrite.json");
 
 type Config = {
 	enabledByDefault: boolean;
@@ -16,11 +20,11 @@ type Config = {
 export default function rtkRewriteExtension(pi: ExtensionAPI) {
 	const config = readConfig();
 	const rewriteCache = new Map<string, string | null>();
-	let sessionEnabled = config.enabledByDefault;
+	let sessionEnabled = readPersistedEnabled() ?? config.enabledByDefault;
 	let rtkAvailable: boolean | null = null;
 
 	pi.registerCommand(KEY, {
-		description: "Manage RTK bash rewriting: /rtk-rewrite [status|on|off|refresh|test <cmd>|help]",
+		description: "Manage RTK bash rewriting: /rtk-rewrite [status|on|off|reset|refresh|test <cmd>|help]",
 		handler: async (args, ctx) => {
 			const trimmed = (args ?? "").trim();
 			const [command, ...rest] = trimmed.split(/\s+/).filter(Boolean);
@@ -29,19 +33,30 @@ export default function rtkRewriteExtension(pi: ExtensionAPI) {
 			switch (subcommand) {
 				case "":
 				case "status": {
+					syncPersistedEnabled();
 					await refreshAvailability(ctx, true);
 					ctx.ui.notify(buildStatusMessage(config, sessionEnabled, rtkAvailable), "info");
 					return;
 				}
 				case "on": {
 					sessionEnabled = true;
+					const persisted = writePersistedEnabled(sessionEnabled);
 					await refreshAvailability(ctx, true);
 					updateStatus(ctx);
-					ctx.ui.notify(buildStatusMessage(config, sessionEnabled, rtkAvailable), "info");
+					ctx.ui.notify(buildStatusMessage(config, sessionEnabled, rtkAvailable, persisted), persisted ? "info" : "warning");
 					return;
 				}
 				case "off": {
 					sessionEnabled = false;
+					const persisted = writePersistedEnabled(sessionEnabled);
+					updateStatus(ctx);
+					ctx.ui.notify(buildStatusMessage(config, sessionEnabled, rtkAvailable, persisted), persisted ? "info" : "warning");
+					return;
+				}
+				case "reset": {
+					clearPersistedEnabled();
+					sessionEnabled = config.enabledByDefault;
+					await refreshAvailability(ctx, true);
 					updateStatus(ctx);
 					ctx.ui.notify(buildStatusMessage(config, sessionEnabled, rtkAvailable), "info");
 					return;
@@ -79,8 +94,9 @@ export default function rtkRewriteExtension(pi: ExtensionAPI) {
 							"",
 							"Commands:",
 							"  /rtk-rewrite status        Show current state",
-							"  /rtk-rewrite on            Enable rewriting for this session",
-							"  /rtk-rewrite off           Disable rewriting for this session",
+							"  /rtk-rewrite on            Enable rewriting globally",
+							"  /rtk-rewrite off           Disable rewriting globally",
+							"  /rtk-rewrite reset         Clear global on/off override",
 							"  /rtk-rewrite refresh       Re-check RTK availability",
 							"  /rtk-rewrite test <cmd>    Preview one rewrite",
 							"",
@@ -89,6 +105,9 @@ export default function rtkRewriteExtension(pi: ExtensionAPI) {
 							`  PI_RTK_REWRITE_TIMEOUT_MS=${config.timeoutMs}`,
 							`  PI_RTK_REWRITE_VERBOSE=${config.verbose ? "1" : "0"}`,
 							`  PI_RTK_REWRITE_SHOW_STATUS=${config.showStatus ? "1" : "0"}`,
+							"",
+							"State:",
+							`  ${STATE_PATH}`,
 							"",
 							"Notes:",
 							"  - Rewrites only pi bash tool calls.",
@@ -107,7 +126,7 @@ export default function rtkRewriteExtension(pi: ExtensionAPI) {
 	});
 
 	pi.on("session_start", async (_event, ctx) => {
-		sessionEnabled = config.enabledByDefault;
+		sessionEnabled = readPersistedEnabled() ?? config.enabledByDefault;
 		rewriteCache.clear();
 		await refreshAvailability(ctx, false);
 		updateStatus(ctx);
@@ -121,6 +140,8 @@ export default function rtkRewriteExtension(pi: ExtensionAPI) {
 	});
 
 	pi.on("tool_call", async (event, ctx) => {
+		syncPersistedEnabled();
+		updateStatus(ctx);
 		if (!sessionEnabled) return;
 		if (!isToolCallEventType("bash", event)) return;
 
@@ -195,6 +216,10 @@ export default function rtkRewriteExtension(pi: ExtensionAPI) {
 		}
 		ctx.ui.setStatus(KEY, buildStatusLine(sessionEnabled, rtkAvailable));
 	}
+
+	function syncPersistedEnabled() {
+		sessionEnabled = readPersistedEnabled() ?? config.enabledByDefault;
+	}
 }
 
 function withLcAll(command: string): string {
@@ -202,13 +227,22 @@ function withLcAll(command: string): string {
 	return `${LC_ALL_PREFIX}\n${command}`;
 }
 
-function buildStatusMessage(config: Config, sessionEnabled: boolean, rtkAvailable: boolean | null): string {
+function buildStatusMessage(
+	config: Config,
+	sessionEnabled: boolean,
+	rtkAvailable: boolean | null,
+	persisted?: boolean,
+): string {
 	const availability = rtkAvailable === null ? "checking" : rtkAvailable ? "available" : "missing";
+	const state = readPersistedEnabled();
 	return [
 		`RTK rewrite: ${sessionEnabled ? "enabled" : "disabled"}`,
+		`Global override: ${state === null ? "none" : state ? "on" : "off"}`,
+		`State file: ${STATE_PATH}`,
 		`RTK binary: ${availability}`,
 		`Timeout: ${config.timeoutMs}ms`,
 		`Verbose: ${config.verbose ? "on" : "off"}`,
+		...(persisted === false ? ["", "Warning: failed to write global override; change applies only to this process."] : []),
 	].join("\n");
 }
 
@@ -216,6 +250,44 @@ function buildStatusLine(sessionEnabled: boolean, rtkAvailable: boolean | null):
 	if (!sessionEnabled) return "RTK: off";
 	if (rtkAvailable === null) return "RTK: checking";
 	return rtkAvailable ? "RTK: on" : "RTK: missing";
+}
+
+function readPersistedEnabled(): boolean | null {
+	try {
+		if (!existsSync(STATE_PATH)) return null;
+		const parsed = JSON.parse(readFileSync(STATE_PATH, "utf8")) as { enabled?: unknown };
+		return typeof parsed.enabled === "boolean" ? parsed.enabled : null;
+	} catch {
+		return null;
+	}
+}
+
+function writePersistedEnabled(enabled: boolean): boolean {
+	try {
+		mkdirSync(dirname(STATE_PATH), { recursive: true });
+		writeFileSync(STATE_PATH, `${JSON.stringify({ enabled }, null, "\t")}\n`, "utf8");
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+function clearPersistedEnabled() {
+	try {
+		rmSync(STATE_PATH, { force: true });
+	} catch {
+		// Ignore; the in-memory state still falls back to env/defaults.
+	}
+}
+
+function getAgentDir(): string {
+	return expandTildePath(process.env.PI_CODING_AGENT_DIR?.trim() || "~/.pi/agent");
+}
+
+function expandTildePath(path: string): string {
+	if (path === "~") return homedir();
+	if (path.startsWith("~/")) return join(homedir(), path.slice(2));
+	return path;
 }
 
 function readConfig(): Config {
