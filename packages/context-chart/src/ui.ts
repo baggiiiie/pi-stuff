@@ -339,6 +339,15 @@ export function renderHtml(initialPayload: ChartPayload): string {
 			return value.toFixed(1) + '%';
 		}
 
+		function formatPrice(value) {
+			if (typeof value !== 'number' || !Number.isFinite(value)) return 'unavailable';
+			if (value === 0) return '$0.0000';
+			if (Math.abs(value) < 0.000001) return '<$0.000001';
+			if (Math.abs(value) < 0.0001) return '$' + value.toFixed(6);
+			if (Math.abs(value) < 0.01) return '$' + value.toFixed(5);
+			return '$' + value.toFixed(4);
+		}
+
 		function buildDatasets(points) {
 			const isBar = chartType === 'bar';
 			return [
@@ -433,8 +442,13 @@ export function renderHtml(initialPayload: ChartPayload): string {
 									return ' ' + item.dataset.label + '  ' + fmt.format(item.raw || 0);
 								},
 								footer(items) {
+									const index = items[0]?.dataIndex;
+									const point = typeof index === 'number' ? currentPayload?.points[index] : undefined;
 									const total = items.reduce((sum, item) => sum + (item.raw || 0), 0);
-									return (chartType === 'bar' ? 'Total added  ' : 'Total  ') + fmt.format(total);
+									return [
+										(chartType === 'bar' ? 'Total added  ' : 'Total  ') + fmt.format(total),
+										'Turn price  ' + formatPrice(point?.turnPrice),
+									];
 								},
 							},
 						},

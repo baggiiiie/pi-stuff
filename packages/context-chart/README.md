@@ -64,6 +64,8 @@ If `getContextUsage()` is unavailable (e.g. right after compaction, or for live 
 
 For the chart, each historical turn's snapshot is built by calling `buildSessionContext(entries, parentId, byId)` which reconstructs the full message array that was sent to the model for that specific turn. This means each data point reflects the **cumulative** context size at that moment, not just the incremental addition.
 
+Hovering a point also shows the assistant turn's price when pi has pricing data for that turn. If the provider/model has no usable price data, the tooltip shows `unavailable`.
+
 ### Cache hit rate
 
 The footer displays a prompt cache hit rate after the context breakdown. It is calculated as:

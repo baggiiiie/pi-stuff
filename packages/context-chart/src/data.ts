@@ -1,4 +1,4 @@
-import type { AgentMessage, AssistantMessage } from "@mariozechner/pi-ai";
+import type { AgentMessage, AssistantMessage, Usage } from "@mariozechner/pi-ai";
 import {
 	buildSessionContext,
 	estimateTokens,
@@ -26,6 +26,7 @@ export type Snapshot = {
 	tools: number;
 	memory: number;
 	total: number;
+	turnPrice: number | null;
 	source: "recorded" | "live";
 	turnLabel?: string;
 	summary?: string;
@@ -39,6 +40,17 @@ export type UsageTotals = {
 	cacheRead: number;
 	cacheWrite: number;
 	cost: number;
+};
+
+type PricingModel = {
+	id: string;
+	provider: string;
+	cost: {
+		input: number;
+		output: number;
+		cacheRead: number;
+		cacheWrite: number;
+	};
 };
 
 export type SharedState = {
@@ -171,11 +183,13 @@ function buildRecordedSnapshots(ctx: ExtensionContext): Snapshot[] {
 		}
 		if (entry.type !== "message" || entry.message.role !== "assistant") continue;
 		turn += 1;
+		const assistantMessage = entry.message as AssistantMessage;
 		const toolNames = extractToolNames(entry.message);
 		const toolDetails = extractToolDetails(branch, i);
 		const context = buildSessionContext(entries, entry.parentId ?? null, byId);
 		snapshots.push({
 			...buildSnapshot(context.messages, systemPrompt, turn, "recorded"),
+			turnPrice: extractTurnPrice(assistantMessage, ctx.model),
 			turnLabel: toolNames.length > 0 ? (toolNames.length === 1 ? "Tool call" : "Tool calls") : "User message",
 			summary: buildTurnSummary(lastUserText, toolNames),
 			timestamp: safeTimestamp(entry.timestamp),
@@ -223,6 +237,7 @@ function buildSnapshot(messages: AgentMessage[], systemPrompt: string, turn: num
 		tools: 0,
 		memory: 0,
 		total: 0,
+		turnPrice: null,
 		source,
 	};
 
@@ -281,6 +296,73 @@ function collectUsage(ctx: ExtensionContext): UsageTotals {
 		usage.cost += message.usage?.cost?.total ?? 0;
 	}
 	return usage;
+}
+
+function extractTurnPrice(message: AssistantMessage, currentModel: PricingModel | null | undefined): number | null {
+	const usage = message.usage;
+	if (!usage) return null;
+	const tokens = normalizeUsageTokens(usage);
+	const tokenTotal = tokens ? tokens.input + tokens.output + tokens.cacheRead + tokens.cacheWrite : null;
+
+	const reported = normalizePrice(usage.cost?.total);
+	if (reported !== null && reported > 0) return reported;
+
+	const reportedComponents = sumCost(usage.cost);
+	if (reportedComponents > 0) return reportedComponents;
+	if (tokenTotal === 0) return 0;
+
+	const model = resolvePricingModel(message, currentModel);
+	if (!model || !hasAnyPositiveRate(model.cost)) return null;
+	if (!tokens) return null;
+
+	const price =
+		(model.cost.input * tokens.input) / 1_000_000 +
+		(model.cost.output * tokens.output) / 1_000_000 +
+		(model.cost.cacheRead * tokens.cacheRead) / 1_000_000 +
+		(model.cost.cacheWrite * tokens.cacheWrite) / 1_000_000;
+	return normalizePrice(price);
+}
+
+function resolvePricingModel(message: AssistantMessage, currentModel: PricingModel | null | undefined): PricingModel | undefined {
+	if (!currentModel || currentModel.provider !== message.provider) return undefined;
+	if (currentModel.id !== message.model && currentModel.id !== message.responseModel) return undefined;
+	return currentModel;
+}
+
+function normalizePrice(value: unknown): number | null {
+	return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
+}
+
+function sumCost(cost: Usage["cost"] | undefined): number {
+	if (!cost) return 0;
+	return (
+		(normalizePrice(cost.input) ?? 0) +
+		(normalizePrice(cost.output) ?? 0) +
+		(normalizePrice(cost.cacheRead) ?? 0) +
+		(normalizePrice(cost.cacheWrite) ?? 0)
+	);
+}
+
+function hasAnyPositiveRate(cost: { input: number; output: number; cacheRead: number; cacheWrite: number }): boolean {
+	return cost.input > 0 || cost.output > 0 || cost.cacheRead > 0 || cost.cacheWrite > 0;
+}
+
+function normalizeUsageTokens(usage: Usage): Pick<Usage, "input" | "output" | "cacheRead" | "cacheWrite"> | null {
+	const input = normalizeTokenCount(usage.input);
+	const output = normalizeTokenCount(usage.output);
+	const cacheRead = normalizeTokenCount(usage.cacheRead);
+	const cacheWrite = normalizeTokenCount(usage.cacheWrite);
+	if (input === null && output === null && cacheRead === null && cacheWrite === null) return null;
+	return {
+		input: input ?? 0,
+		output: output ?? 0,
+		cacheRead: cacheRead ?? 0,
+		cacheWrite: cacheWrite ?? 0,
+	};
+}
+
+function normalizeTokenCount(value: unknown): number | null {
+	return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
 }
 
 function countAssistantMessages(entries: SessionEntry[]): number {
