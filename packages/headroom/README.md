@@ -13,7 +13,7 @@ It is intentionally conservative:
 ## Install
 
 ```bash
-pi install ./packages/headroom
+ pi install npm:@baggiiiie/pi-headroom
 ```
 
 Install and run Headroom separately:
