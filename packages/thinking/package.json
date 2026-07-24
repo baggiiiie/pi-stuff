@@ -1,0 +1,13 @@
+{
+  "name": "@baggiiiie/pi-thinking",
+  "version": "0.0.1",
+  "type": "module",
+  "files": ["src", "README.md"],
+  "keywords": ["pi-package", "thinking", "command"],
+  "pi": {
+    "extensions": ["./src/thinking.ts"]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  }
+}
