@@ -1,0 +1,19 @@
+{
+  "name": "@baggiiiie/pi-executor",
+  "version": "0.0.1",
+  "description": "Connect Pi to an Executor integration catalog",
+  "type": "module",
+  "files": ["src", "README.md", "LICENSE"],
+  "keywords": ["pi-package", "executor", "integrations", "tools"],
+  "pi": {
+    "extensions": ["./src/executor.ts"]
+  },
+  "dependencies": {
+    "executor": "^1.5.37"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "typebox": "*"
+  }
+}
