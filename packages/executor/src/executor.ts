@@ -1,9 +1,13 @@
 import { existsSync } from "node:fs";
-import { mkdtemp, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { homedir, tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { StringEnum } from "@earendil-works/pi-ai";
 import {
   DEFAULT_MAX_BYTES,
@@ -16,13 +20,7 @@ import { Type } from "typebox";
 
 const DEFAULT_TIMEOUT_MS = 120_000;
 const EXECUTOR_SOURCE_DIR = dirname(fileURLToPath(import.meta.url));
-const EXECUTOR_TOOL_NAMES = [
-  "executor_search_tools",
-  "executor_list_integrations",
-  "executor_describe_tool",
-  "executor_call_tool",
-  "executor_resume",
-] as const;
+const EXECUTOR_TOOL_NAMES = ["executor", "executor_skill", "executor_resume"] as const;
 
 interface ExecutorConfig {
   executable: { command: string; prefixArgs: string[]; source: string };
@@ -35,9 +33,25 @@ interface ExecutorConfig {
 
 interface ExecutorDetails {
   operation: string;
-  exitCode: number;
+  transport: "mcp" | "cli";
   truncated: boolean;
   fullOutputPath?: string;
+}
+
+interface McpContentBlock {
+  type?: unknown;
+  text?: unknown;
+  data?: unknown;
+  mimeType?: unknown;
+  uri?: unknown;
+  name?: unknown;
+  resource?: unknown;
+}
+
+interface McpToolEnvelope {
+  content?: unknown;
+  structuredContent?: unknown;
+  isError?: unknown;
 }
 
 function positiveInteger(value: string | undefined, fallback: number): number {
@@ -126,26 +140,317 @@ function targetDescription(config: ExecutorConfig): string {
   if (config.error) return `invalid configuration: ${config.error}`;
   if (config.server) return `server profile ${config.server}`;
   if (config.baseUrl) return config.baseUrl;
-  return "local Executor (auto-started when needed)";
+  return "local Executor MCP (stdio)";
+}
+
+function mcpUrl(baseUrl: string): URL {
+  const url = new URL(baseUrl);
+  const path = url.pathname.replace(/\/$/u, "");
+  if (!path.endsWith("/mcp")) url.pathname = `${path}/mcp`;
+  url.searchParams.set("elicitation_mode", "model");
+  url.searchParams.set("artifacts", "false");
+  return url;
+}
+
+function inheritedEnvironment(): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined),
+  );
+}
+
+function executorDataDir(): string {
+  return resolve(process.env.EXECUTOR_DATA_DIR ?? join(homedir(), ".executor"));
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+async function readJsonRecord(path: string): Promise<Record<string, unknown> | undefined> {
+  try {
+    const parsed: unknown = JSON.parse(await readFile(path, "utf8"));
+    return isRecord(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function normalizedOrigin(value: string): string | undefined {
+  try {
+    const url = new URL(value);
+    return `${url.origin}${url.pathname.replace(/\/+$/u, "")}`;
+  } catch {
+    return undefined;
+  }
+}
+
+function authHeader(auth: unknown): string | undefined {
+  if (!isRecord(auth) || typeof auth.kind !== "string") return undefined;
+  if (auth.kind === "bearer" && typeof auth.token === "string") return `Bearer ${auth.token}`;
+  if (auth.kind === "oauth" && typeof auth.accessToken === "string") {
+    return `Bearer ${auth.accessToken}`;
+  }
+  if (auth.kind === "basic" && typeof auth.password === "string") {
+    const username = typeof auth.username === "string" ? auth.username : "";
+    return `Basic ${Buffer.from(`${username}:${auth.password}`).toString("base64")}`;
+  }
+  return undefined;
+}
+
+async function localAuthHeader(): Promise<string | undefined> {
+  const auth = await readJsonRecord(join(executorDataDir(), "server-control", "auth.json"));
+  return typeof auth?.token === "string" ? `Bearer ${auth.token}` : undefined;
+}
+
+async function resolveHttpTarget(config: ExecutorConfig): Promise<{
+  origin: string;
+  authorization?: string;
+}> {
+  const store = await readJsonRecord(join(executorDataDir(), "server-connections.json"));
+  const profiles = Array.isArray(store?.profiles) ? store.profiles.filter(isRecord) : [];
+  const profile = config.server
+    ? profiles.find((candidate) => candidate.name === config.server)
+    : profiles.find((candidate) => {
+        const connection = isRecord(candidate.connection) ? candidate.connection : undefined;
+        const origin =
+          typeof connection?.origin === "string"
+            ? connection.origin
+            : typeof connection?.apiBaseUrl === "string"
+              ? connection.apiBaseUrl
+              : undefined;
+        return (
+          origin !== undefined &&
+          config.baseUrl !== undefined &&
+          normalizedOrigin(origin) === normalizedOrigin(config.baseUrl)
+        );
+      });
+
+  if (config.server && !profile) {
+    throw new Error(
+      `No Executor server profile named "${config.server}". Run \`executor server list\` to inspect configured profiles.`,
+    );
+  }
+
+  const connection = isRecord(profile?.connection) ? profile.connection : undefined;
+  const origin =
+    typeof connection?.origin === "string"
+      ? connection.origin
+      : typeof connection?.apiBaseUrl === "string"
+        ? connection.apiBaseUrl
+        : config.baseUrl;
+  if (!origin) throw new Error("Executor HTTP target has no origin.");
+
+  const envToken = process.env.EXECUTOR_API_KEY ?? process.env.EXECUTOR_AUTH_TOKEN;
+  const url = new URL(origin);
+  const authorization =
+    authHeader(connection?.auth) ??
+    (envToken ? `Bearer ${envToken}` : undefined) ??
+    (["localhost", "127.0.0.1", "::1", "[::1]"].includes(url.hostname)
+      ? await localAuthHeader()
+      : undefined);
+  return { origin, authorization };
+}
+
+async function createExecutorTransport(config: ExecutorConfig, cwd: string): Promise<Transport> {
+  if (config.error) throw new Error(config.error);
+
+  if (config.baseUrl || config.server) {
+    const target = await resolveHttpTarget(config);
+    return new StreamableHTTPClientTransport(mcpUrl(target.origin), {
+      requestInit: target.authorization
+        ? { headers: { Authorization: target.authorization } }
+        : undefined,
+    });
+  }
+
+  const args = [
+    ...config.executable.prefixArgs,
+    "mcp",
+    "--elicitation-mode",
+    "model",
+    "--no-artifacts",
+  ];
+  if (config.scope) args.push("--scope", config.scope);
+
+  const transport = new StdioClientTransport({
+    command: config.executable.command,
+    args,
+    cwd,
+    env: inheritedEnvironment(),
+    stderr: "pipe",
+  });
+  // Drain diagnostics so a noisy child cannot block on a full stderr pipe.
+  transport.stderr?.on("data", () => undefined);
+  return transport;
+}
+
+function blockText(block: McpContentBlock): string | undefined {
+  if (block.type === "text" && typeof block.text === "string") return block.text;
+
+  if (block.type === "resource" && isRecord(block.resource)) {
+    if (typeof block.resource.text === "string") return block.resource.text;
+    const label =
+      typeof block.resource.uri === "string" ? block.resource.uri : "embedded binary resource";
+    return `[Executor emitted ${label}]`;
+  }
+
+  if (block.type === "resource_link" && typeof block.uri === "string") {
+    return typeof block.name === "string" ? `${block.name}: ${block.uri}` : block.uri;
+  }
+
+  if (block.type === "audio") {
+    const mime = typeof block.mimeType === "string" ? ` (${block.mimeType})` : "";
+    return `[Executor emitted audio content${mime}]`;
+  }
+
+  if (block.type !== "image") return JSON.stringify(block);
+  return undefined;
+}
+
+async function formatMcpResult(
+  operation: string,
+  raw: unknown,
+): Promise<{
+  content: Array<
+    | { type: "text"; text: string }
+    | { type: "image"; data: string; mimeType: string }
+  >;
+  details: ExecutorDetails;
+  isError: boolean;
+}> {
+  const envelope: McpToolEnvelope = isRecord(raw) ? raw : {};
+  const blocks = Array.isArray(envelope.content)
+    ? (envelope.content.filter(isRecord) as McpContentBlock[])
+    : [];
+  const text = blocks.map(blockText).filter((value): value is string => value !== undefined);
+  const images = blocks.flatMap((block) =>
+    block.type === "image" && typeof block.data === "string" && typeof block.mimeType === "string"
+      ? [{ type: "image" as const, data: block.data, mimeType: block.mimeType }]
+      : [],
+  );
+
+  if (text.length === 0 && images.length === 0) {
+    if (envelope.structuredContent !== undefined) {
+      text.push(JSON.stringify(envelope.structuredContent, null, 2));
+    } else if (!isRecord(raw)) {
+      text.push(typeof raw === "string" ? raw : JSON.stringify(raw, null, 2));
+    } else {
+      text.push("Executor completed without output.");
+    }
+  }
+
+  const limited = await truncateOutput(text.join("\n"));
+  return {
+    content: [
+      ...(limited.text ? [{ type: "text" as const, text: limited.text }] : []),
+      ...images,
+    ],
+    details: {
+      operation,
+      transport: "mcp",
+      truncated: limited.truncated,
+      fullOutputPath: limited.fullOutputPath,
+    },
+    isError: envelope.isError === true,
+  };
 }
 
 export default function executorExtension(pi: ExtensionAPI) {
   const config = readExecutorConfig();
+  let client: Client | undefined;
+  let clientPromise: Promise<Client> | undefined;
+  let clientCwd: string | undefined;
 
-  const runExecutor = async (input: {
+  const closeClient = async () => {
+    const current = client ?? (clientPromise ? await clientPromise.catch(() => undefined) : undefined);
+    client = undefined;
+    clientPromise = undefined;
+    clientCwd = undefined;
+    await current?.close().catch(() => undefined);
+  };
+
+  const getClient = async (cwd: string): Promise<Client> => {
+    if (client && clientCwd === cwd) return client;
+    if (clientPromise && clientCwd === cwd) return clientPromise;
+    if (client || clientPromise) await closeClient();
+
+    clientCwd = cwd;
+    clientPromise = (async () => {
+      const created = new Client(
+        { name: "pi-executor", version: "1.0.0" },
+        { capabilities: {} },
+      );
+      const transport = await createExecutorTransport(config, cwd);
+      try {
+        await created.connect(transport);
+      } catch (error) {
+        await transport.close().catch(() => undefined);
+        throw error;
+      }
+      client = created;
+      return created;
+    })();
+
+    try {
+      return await clientPromise;
+    } catch (error) {
+      clientPromise = undefined;
+      clientCwd = undefined;
+      throw error;
+    }
+  };
+
+  const callMcp = async (input: {
+    operation: string;
+    toolName: "execute" | "skills" | "resume";
+    args: Record<string, unknown>;
+    cwd: string;
+    signal?: AbortSignal;
+    onUpdate?: (result: { content: Array<{ type: "text"; text: string }>; details: unknown }) => void;
+  }) => {
+    if (config.error) throw new Error(config.error);
+    if (input.signal?.aborted) throw new Error("Executor call was cancelled.");
+
+    input.onUpdate?.({
+      content: [{ type: "text", text: `${input.operation}…` }],
+      details: { operation: input.operation, transport: "mcp" },
+    });
+
+    const current = await getClient(input.cwd);
+    let raw: unknown;
+    try {
+      raw = await current.callTool(
+        { name: input.toolName, arguments: input.args },
+        undefined,
+        {
+          signal: input.signal,
+          timeout: config.timeoutMs > 0 ? config.timeoutMs : 2_147_483_647,
+        },
+      );
+    } catch (error) {
+      await closeClient();
+      throw error;
+    }
+
+    const result = await formatMcpResult(input.operation, raw);
+    if (result.isError) {
+      const message = result.content
+        .filter((part): part is { type: "text"; text: string } => part.type === "text")
+        .map((part) => part.text)
+        .join("\n");
+      throw new Error(message || "Executor execution failed.");
+    }
+    return { content: result.content, details: result.details };
+  };
+
+  const runCli = async (input: {
     operation: string;
     args: string[];
     cwd: string;
     signal?: AbortSignal;
-    onUpdate?: (result: { content: Array<{ type: "text"; text: string }>; details: unknown }) => void;
     includeTarget?: boolean;
   }) => {
     if (config.error) throw new Error(config.error);
-    input.onUpdate?.({
-      content: [{ type: "text", text: `${input.operation}…` }],
-      details: { operation: input.operation },
-    });
-
     const args = [
       ...config.executable.prefixArgs,
       ...input.args,
@@ -169,11 +474,12 @@ export default function executorExtension(pi: ExtensionAPI) {
     }
     if (result.code !== 0) {
       const message = stderr || stdout || `Executor exited with code ${result.code}.`;
-      const truncated = truncateHead(message, {
-        maxLines: DEFAULT_MAX_LINES,
-        maxBytes: DEFAULT_MAX_BYTES,
-      });
-      throw new Error(truncated.content);
+      throw new Error(
+        truncateHead(message, {
+          maxLines: DEFAULT_MAX_LINES,
+          maxBytes: DEFAULT_MAX_BYTES,
+        }).content,
+      );
     }
 
     const output = [stdout, stderr ? `Executor warnings:\n${stderr}` : ""]
@@ -184,7 +490,7 @@ export default function executorExtension(pi: ExtensionAPI) {
       content: [{ type: "text" as const, text: limited.text }],
       details: {
         operation: input.operation,
-        exitCode: result.code,
+        transport: "cli" as const,
         truncated: limited.truncated,
         fullOutputPath: limited.fullOutputPath,
       } satisfies ExecutorDetails,
@@ -192,54 +498,26 @@ export default function executorExtension(pi: ExtensionAPI) {
   };
 
   pi.registerTool({
-    name: "executor_search_tools",
-    label: "Executor Search",
+    name: "executor",
+    label: "Executor",
     description:
-      `Search the configured Executor catalog by intent. Results are truncated to ${DEFAULT_MAX_LINES} lines or ${formatSize(DEFAULT_MAX_BYTES)}. Search before calling an unfamiliar tool.`,
-    promptSnippet: "Search the Executor integration catalog for tools by intent",
+      "Execute TypeScript in Executor's QuickJS sandbox with access to configured integrations through the lazy `tools` proxy. Call executor_skill first when you need the calling workflow. Return the exact value needed from the code; only the execution's output is returned, not the surrounding MCP or HTTP response envelope.",
+    promptSnippet: "Run TypeScript in Executor's QuickJS sandbox to call configured integrations",
     promptGuidelines: [
-      "Use executor_search_tools to discover an Executor tool, then executor_describe_tool to inspect its input before calling executor_call_tool.",
+      "Use executor by passing TypeScript code that searches, describes, and calls integrations through `tools.*`; do not ask for separate direct integration tools.",
+      "Call executor_skill with name `execute` before the first non-trivial Executor script in a session.",
     ],
     parameters: Type.Object({
-      query: Type.String({ description: "Natural-language capability to find, such as 'send email'" }),
-      namespace: Type.Optional(Type.String({ description: "Restrict results to an integration namespace" })),
-      limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 100, default: 12 })),
+      code: Type.String({
+        description:
+          "TypeScript/JavaScript to execute. Use `return` for data the model must read and `emit` for user-visible MCP content.",
+      }),
     }),
     async execute(_id, params, signal, onUpdate, ctx) {
-      const args = ["tools", "search", params.query, "--limit", String(params.limit ?? 12)];
-      if (params.namespace) args.push("--namespace", params.namespace);
-      return runExecutor({ operation: "Searching Executor tools", args, cwd: ctx.cwd, signal, onUpdate });
-    },
-  });
-
-  pi.registerTool({
-    name: "executor_list_integrations",
-    label: "Executor Integrations",
-    description: "List integrations configured in Executor and their tool counts.",
-    promptSnippet: "List integrations connected to Executor",
-    parameters: Type.Object({
-      query: Type.Optional(Type.String({ description: "Optional integration filter" })),
-      limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 200, default: 50 })),
-    }),
-    async execute(_id, params, signal, onUpdate, ctx) {
-      const args = ["tools", "integrations", "--limit", String(params.limit ?? 50)];
-      if (params.query) args.push("--query", params.query);
-      return runExecutor({ operation: "Listing Executor integrations", args, cwd: ctx.cwd, signal, onUpdate });
-    },
-  });
-
-  pi.registerTool({
-    name: "executor_describe_tool",
-    label: "Executor Describe",
-    description: "Show the TypeScript signature and JSON schema for an Executor tool path.",
-    promptSnippet: "Inspect an Executor tool's input schema",
-    parameters: Type.Object({
-      path: Type.String({ description: "Dotted tool path returned by executor_search_tools" }),
-    }),
-    async execute(_id, params, signal, onUpdate, ctx) {
-      return runExecutor({
-        operation: `Describing ${params.path}`,
-        args: ["tools", "describe", params.path],
+      return callMcp({
+        operation: "Executing in Executor",
+        toolName: "execute",
+        args: { code: params.code },
         cwd: ctx.cwd,
         signal,
         onUpdate,
@@ -248,23 +526,21 @@ export default function executorExtension(pi: ExtensionAPI) {
   });
 
   pi.registerTool({
-    name: "executor_call_tool",
-    label: "Executor Call",
+    name: "executor_skill",
+    label: "Executor Skill",
     description:
-      "Invoke a tool from the configured Executor catalog. Executor applies the connection's authentication and per-tool policy. If the result pauses for authentication or approval, report its instructions and use executor_resume afterward.",
-    promptSnippet: "Call a configured Executor integration tool",
+      "Fetch Executor's current code-mode instructions. Use name `execute` to learn how to search the catalog, inspect schemas, call tools, return values, emit files, and handle pauses.",
+    promptSnippet: "Fetch Executor's code-mode usage guide",
     parameters: Type.Object({
-      path: Type.String({ description: "Exact dotted tool path" }),
-      arguments: Type.Optional(
-        Type.Record(Type.String(), Type.Unknown(), {
-          description: "JSON object matching the schema from executor_describe_tool",
-        }),
+      name: Type.Optional(
+        Type.String({ description: "Skill name. Use `execute`; omit to list available skills." }),
       ),
     }),
     async execute(_id, params, signal, onUpdate, ctx) {
-      return runExecutor({
-        operation: `Calling ${params.path}`,
-        args: ["call", params.path, JSON.stringify(params.arguments ?? {})],
+      return callMcp({
+        operation: params.name ? `Fetching Executor skill ${params.name}` : "Listing Executor skills",
+        toolName: "skills",
+        args: params.name ? { name: params.name } : {},
         cwd: ctx.cwd,
         signal,
         onUpdate,
@@ -276,10 +552,10 @@ export default function executorExtension(pi: ExtensionAPI) {
     name: "executor_resume",
     label: "Executor Resume",
     description:
-      "Resume an Executor execution paused for authentication, approval, or form input. Use the execution ID and requested schema from executor_call_tool's result.",
-    promptSnippet: "Resume a paused Executor tool execution",
+      "Resume an Executor code execution paused for authentication, approval, or form input. Use the executionId and requested schema returned by executor.",
+    promptSnippet: "Resume a paused Executor code execution",
     parameters: Type.Object({
-      execution_id: Type.String({ description: "Execution ID returned by the paused call" }),
+      executionId: Type.String({ description: "Execution ID returned by executor" }),
       action: Type.Optional(
         StringEnum(["accept", "decline", "cancel"] as const, {
           description: "How to answer the pending interaction",
@@ -293,10 +569,18 @@ export default function executorExtension(pi: ExtensionAPI) {
       ),
     }),
     async execute(_id, params, signal, onUpdate, ctx) {
-      const action = params.action ?? "accept";
-      const args = ["resume", "--execution-id", params.execution_id, "--action", action];
-      if (params.content !== undefined) args.push("--content", JSON.stringify(params.content));
-      return runExecutor({ operation: "Resuming Executor execution", args, cwd: ctx.cwd, signal, onUpdate });
+      return callMcp({
+        operation: "Resuming Executor execution",
+        toolName: "resume",
+        args: {
+          executionId: params.executionId,
+          action: params.action ?? "accept",
+          content: JSON.stringify(params.content ?? {}),
+        },
+        cwd: ctx.cwd,
+        signal,
+        onUpdate,
+      });
     },
   });
 
@@ -309,19 +593,25 @@ export default function executorExtension(pi: ExtensionAPI) {
     pi.setActiveTools([...new Set([...pi.getActiveTools(), ...EXECUTOR_TOOL_NAMES])]);
   };
 
-  // Keep Executor out of the model's initial tool schemas and system prompt.
-  // The extension itself remains loaded so it can expose /use-executor.
   pi.on("session_start", () => {
-    disableExecutorTools();
+    if (process.env.PI_EXECUTOR === "1") {
+      enableExecutorTools();
+    } else {
+      disableExecutorTools();
+    }
+  });
+
+  pi.on("session_shutdown", async () => {
+    await closeClient();
   });
 
   pi.registerCommand("use-executor", {
-    description: "Enable Executor tools for this Pi session",
+    description: "Enable Executor code-mode tools for this Pi session",
     handler: async (rawArgs, ctx) => {
       const action = rawArgs.trim().toLowerCase() || "on";
       if (action === "on") {
         enableExecutorTools();
-        ctx.ui.notify("Executor tools enabled for this session.", "info");
+        ctx.ui.notify("Executor code-mode tools enabled for this session.", "info");
         return;
       }
       if (action === "off") {
@@ -346,8 +636,8 @@ export default function executorExtension(pi: ExtensionAPI) {
       if (subcommand === "help") {
         ctx.ui.notify(
           "/executor [status|integrations|open|help]\n" +
-            `Target: ${targetDescription(config)}\n` +
-            "Configure with PI_EXECUTOR_SERVER, PI_EXECUTOR_BASE_URL, PI_EXECUTOR_SCOPE, PI_EXECUTOR_BIN, or PI_EXECUTOR_TIMEOUT_MS.",
+            `Code-mode target: ${targetDescription(config)}\n` +
+            "Configure with PI_EXECUTOR, PI_EXECUTOR_SERVER, PI_EXECUTOR_BASE_URL, PI_EXECUTOR_SCOPE, PI_EXECUTOR_BIN, or PI_EXECUTOR_TIMEOUT_MS.",
           "info",
         );
         return;
@@ -355,7 +645,7 @@ export default function executorExtension(pi: ExtensionAPI) {
 
       try {
         if (subcommand === "open") {
-          const result = await runExecutor({
+          const result = await runCli({
             operation: "Opening Executor",
             args: ["web"],
             cwd: ctx.cwd,
@@ -364,7 +654,7 @@ export default function executorExtension(pi: ExtensionAPI) {
           return;
         }
         if (subcommand === "integrations") {
-          const result = await runExecutor({
+          const result = await runCli({
             operation: "Listing Executor integrations",
             args: ["tools", "integrations", "--limit", "50"],
             cwd: ctx.cwd,
@@ -377,14 +667,14 @@ export default function executorExtension(pi: ExtensionAPI) {
           return;
         }
 
-        const version = await runExecutor({
+        const version = await runCli({
           operation: "Checking Executor",
           args: ["--version"],
           cwd: ctx.cwd,
           includeTarget: false,
         });
         ctx.ui.notify(
-          `${version.content[0]?.text ?? "Executor is installed."}\nTarget: ${targetDescription(config)}\nCLI: ${config.executable.source}`,
+          `${version.content[0]?.text ?? "Executor is installed."}\nCode-mode target: ${targetDescription(config)}\nCLI: ${config.executable.source}`,
           "info",
         );
       } catch (error) {

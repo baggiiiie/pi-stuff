@@ -1,7 +1,7 @@
 {
   "name": "@baggiiiie/pi-executor",
-  "version": "0.0.1",
-  "description": "Connect Pi to an Executor integration catalog",
+  "version": "0.0.2",
+  "description": "Run TypeScript against Executor integrations from Pi",
   "type": "module",
   "files": ["src", "README.md", "LICENSE"],
   "keywords": ["pi-package", "executor", "integrations", "tools"],
@@ -9,6 +9,7 @@
     "extensions": ["./src/executor.ts"]
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "executor": "^1.5.37"
   },
   "peerDependencies": {
