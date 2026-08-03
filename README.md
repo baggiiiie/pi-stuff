@@ -7,7 +7,6 @@ Available packages:
 - `@baggiiiie/pi-context-chart`: opens a live context usage chart to see which turn blew up current context window
 - `@baggiiiie/pi-context-status`: shows current context-window usage in Pi's status line or a custom footer
 - `@baggiiiie/pi-goal`: Codex-style persisted goals with `/goal` controls and model tools to keep working until done
-- `@baggiiiie/pi-lazy-load`: registers stub slash commands that load extensions on first use
 - `@baggiiiie/pi-no-ansi`: keeps pi `bash` tool output clean for the model by disabling color and stripping ANSI escapes
 - `@baggiiiie/pi-openai-server-compaction`: uses native encrypted Codex server-side compaction for supported models
 - `@baggiiiie/pi-rtk-rewrite`: proxies pi `bash` tool calls through [rtk](https://github.com/rtk-ai/rtk) before execution
@@ -25,7 +24,6 @@ or individually:
 pi install npm:@baggiiiie/pi-context-chart
 pi install npm:@baggiiiie/pi-context-status
 pi install npm:@baggiiiie/pi-goal
-pi install npm:@baggiiiie/pi-lazy-load
 pi install npm:@baggiiiie/pi-no-ansi
 pi install npm:@baggiiiie/pi-openai-server-compaction
 pi install npm:@baggiiiie/pi-rtk-rewrite
@@ -131,28 +129,6 @@ pi install npm:@baggiiiie/pi-goal
 Notes:
 - The model may mark goals complete via `update_goal({ "status": "complete" })`, but cannot pause, resume, clear, or budget-limit them.
 - Optional `--tokens` budget triggers a budget-limited wrap-up prompt.
-
-### `@baggiiiie/pi-lazy-load`
-
-Registers stub slash commands that load extensions on first use. Configure lazy extensions in `~/.pi/agent/settings.json` and they will be imported dynamically only when invoked, keeping startup fast.
-
-Commands:
-
-```text
-/lazy:list
-/<custom-lazy-command>
-```
-
-Install individually:
-
-```bash
-pi install npm:@baggiiiie/pi-lazy-load
-```
-
-Notes:
-- Configure via `lazyExtensions` array in `~/.pi/agent/settings.json` with entries like `{ "command": "myext", "description": "...", "path": "path/to/ext.ts" }`.
-- Paths resolve relative to `~/.pi/agent` unless absolute or prefixed with `~/`.
-- Extensions must export `install(pi)` or `default` function.
 
 ### `@baggiiiie/pi-no-ansi`
 

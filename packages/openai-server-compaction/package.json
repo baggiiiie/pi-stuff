@@ -1,6 +1,6 @@
 {
   "name": "@baggiiiie/pi-openai-server-compaction",
-  "version": "0.1.0",
+  "version": "0.0.1",
   "description": "Native Codex server-side context compaction for pi",
   "type": "module",
   "engines": { "node": ">=22.19.0" },

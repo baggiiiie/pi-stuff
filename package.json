@@ -21,7 +21,6 @@
     },
     "scripts": {
         "publish:all": "./scripts/publish-all.sh",
-        "publish:changed": "node ./scripts/publish-changed.js",
-        "publish:lazy-load": "./scripts/publish-lazy-load.sh"
+        "publish:changed": "node ./scripts/publish-changed.js"
     }
 }
