@@ -9,6 +9,7 @@ Available packages:
 - `@baggiiiie/pi-goal`: Codex-style persisted goals with `/goal` controls and model tools to keep working until done
 - `@baggiiiie/pi-lazy-load`: registers stub slash commands that load extensions on first use
 - `@baggiiiie/pi-no-ansi`: keeps pi `bash` tool output clean for the model by disabling color and stripping ANSI escapes
+- `@baggiiiie/pi-openai-server-compaction`: uses native encrypted Codex server-side compaction for supported models
 - `@baggiiiie/pi-rtk-rewrite`: proxies pi `bash` tool calls through [rtk](https://github.com/rtk-ai/rtk) before execution
 
 ## Install 
@@ -26,6 +27,7 @@ pi install npm:@baggiiiie/pi-context-status
 pi install npm:@baggiiiie/pi-goal
 pi install npm:@baggiiiie/pi-lazy-load
 pi install npm:@baggiiiie/pi-no-ansi
+pi install npm:@baggiiiie/pi-openai-server-compaction
 pi install npm:@baggiiiie/pi-rtk-rewrite
 pi install npm:@baggiiiie/pi-codex-usage
 ```
@@ -165,6 +167,14 @@ pi install npm:@baggiiiie/pi-no-ansi
 Notes:
 - Only affects pi `bash` tool calls.
 - Intentionally minimal: no commands, no UI, and no command-specific flag rewriting.
+
+### `@baggiiiie/pi-openai-server-compaction`
+
+Uses Codex's native encrypted server-side compaction for Pi's `openai-codex` models, with model-bound artifacts persisted across resume, fork, and repeated compaction.
+
+```bash
+pi install npm:@baggiiiie/pi-openai-server-compaction
+```
 
 ### `@baggiiiie/pi-rtk-rewrite`
 

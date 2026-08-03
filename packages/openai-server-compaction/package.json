@@ -1,0 +1,24 @@
+{
+  "name": "@baggiiiie/pi-openai-server-compaction",
+  "version": "0.1.0",
+  "description": "Native Codex server-side context compaction for pi",
+  "type": "module",
+  "engines": { "node": ">=22.19.0" },
+  "files": ["src", "README.md", "LICENSE"],
+  "keywords": ["pi-package", "codex", "compaction"],
+  "pi": { "extensions": ["./src/index.ts"] },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "0.79.9",
+    "@earendil-works/pi-coding-agent": "0.79.9"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-ai": "0.79.9",
+    "@earendil-works/pi-coding-agent": "0.79.9",
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4"
+  }
+}
