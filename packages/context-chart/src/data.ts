@@ -17,6 +17,21 @@ export type ToolDetail = {
 	isError: boolean;
 };
 
+/** A collapsible section shown in the turn 0 detail overlay. */
+export type ContextSection = {
+	title: string;
+	tokens: number;
+	content: string;
+};
+
+/** Minimal tool definition shape (subset of pi's ToolInfo). */
+export type ToolDef = {
+	name: string;
+	description?: string;
+	parameters?: unknown;
+	source?: string;
+};
+
 export type Snapshot = {
 	version: number;
 	turn: number;
@@ -32,6 +47,8 @@ export type Snapshot = {
 	summary?: string;
 	timestamp?: number;
 	toolDetails?: ToolDetail[];
+	/** Populated for turn 0: breakdown of the base context (system prompt, skills, tool defs). */
+	contextDetails?: ContextSection[];
 };
 
 export type UsageTotals = {
@@ -54,6 +71,7 @@ type PricingModel = {
 };
 
 export type SharedState = {
+	turn0Snapshot: Snapshot;
 	recordedSnapshots: Snapshot[];
 	liveSnapshot: Snapshot | null;
 	currentSnapshot: Snapshot;
@@ -97,18 +115,21 @@ export type FooterViewModel = {
 	usage: UsageTotals;
 };
 
-export function computeSharedState(ctx: ExtensionContext, event?: ContextEvent): SharedState {
-	const recordedSnapshots = buildRecordedSnapshots(ctx);
-	const liveSnapshot = event ? buildLiveSnapshot(event, ctx) : null;
-	const currentSnapshot = buildCurrentContextSnapshot(ctx);
+export function computeSharedState(ctx: ExtensionContext, event?: ContextEvent, tools: ToolDef[] = []): SharedState {
+	const toolSections = buildToolSections(tools);
+	const toolDefTokens = toolSections.reduce((sum, section) => sum + section.tokens, 0);
+	const turn0Snapshot = buildTurn0Snapshot(ctx, toolSections, toolDefTokens);
+	const recordedSnapshots = buildRecordedSnapshots(ctx, toolDefTokens);
+	const liveSnapshot = event ? buildLiveSnapshot(event, ctx, toolDefTokens) : null;
+	const currentSnapshot = buildCurrentContextSnapshot(ctx, toolDefTokens);
 	const usage = collectUsage(ctx);
 	const contextUsage = ctx.getContextUsage();
 	const contextWindow = contextUsage?.contextWindow ?? ctx.model?.contextWindow ?? null;
-	return { recordedSnapshots, liveSnapshot, currentSnapshot, usage, contextUsage, contextWindow };
+	return { turn0Snapshot, recordedSnapshots, liveSnapshot, currentSnapshot, usage, contextUsage, contextWindow };
 }
 
 export function buildChartPayload(state: SharedState, ctx: ExtensionContext): ChartPayload {
-	const points = mergeSnapshots(state.recordedSnapshots, state.liveSnapshot);
+	const points = [state.turn0Snapshot, ...mergeSnapshots(state.recordedSnapshots, state.liveSnapshot)];
 	const current = state.liveSnapshot ?? state.currentSnapshot;
 	const currentPercent =
 		state.contextWindow && current.total > 0 ? (current.total / state.contextWindow) * 100 : null;
@@ -167,7 +188,106 @@ function countTurns(state: SharedState): number {
 	return state.liveSnapshot ? recorded + 1 : recorded;
 }
 
-function buildRecordedSnapshots(ctx: ExtensionContext): Snapshot[] {
+function buildTurn0Snapshot(ctx: ExtensionContext, toolSections: ContextSection[], toolDefTokens: number): Snapshot {
+	const systemPrompt = ctx.getSystemPrompt() ?? "";
+	const promptSections = buildSystemPromptSections(systemPrompt);
+	const systemPromptTokens = estimateTextTokens(systemPrompt);
+	const systemInstructions = systemPromptTokens + toolDefTokens;
+
+	return {
+		version: EXTENSION_SNAPSHOT_VERSION,
+		turn: 0,
+		systemInstructions,
+		userInput: 0,
+		agentOutput: 0,
+		tools: 0,
+		memory: 0,
+		total: systemInstructions,
+		turnPrice: null,
+		source: "recorded",
+		turnLabel: "Initial context",
+		summary: buildTurn0Summary(promptSections, toolSections),
+		contextDetails: [...promptSections, ...toolSections],
+	};
+}
+
+function buildTurn0Summary(promptSections: ContextSection[], toolSections: ContextSection[]): string {
+	const parts: string[] = ["System prompt"];
+	if (promptSections.some((section) => section.title === "Skills")) parts.push("skills");
+	if (toolSections.length > 0) parts.push(`${toolSections.length} tool${toolSections.length === 1 ? "" : "s"}`);
+	return parts.join(" · ");
+}
+
+/** Split the resolved system prompt into labelled sections for the detail overlay. */
+function buildSystemPromptSections(systemPrompt: string): ContextSection[] {
+	if (!systemPrompt.trim()) return [];
+
+	const sections: ContextSection[] = [];
+	let rest = systemPrompt;
+
+	// Peel off the trailing "Current date/working directory" footer so it stays
+	// attributed to the base prompt (it is appended after the skills block).
+	let footer = "";
+	const footerIndex = rest.lastIndexOf("\nCurrent date:");
+	if (footerIndex >= 0) {
+		footer = rest.slice(footerIndex).trim();
+		rest = rest.slice(0, footerIndex);
+	}
+
+	// Extract the skills block (appears after project context in the prompt).
+	let skillsText = "";
+	const skillsIndex = rest.indexOf("<available_skills>");
+	if (skillsIndex >= 0) {
+		// Skills section starts a couple lines before the tag (with intro text).
+		const introIndex = rest.lastIndexOf("\n\nThe following skills provide", skillsIndex);
+		const start = introIndex >= 0 ? introIndex : skillsIndex;
+		const endTag = rest.indexOf("</available_skills>", skillsIndex);
+		const end = endTag >= 0 ? endTag + "</available_skills>".length : rest.length;
+		skillsText = rest.slice(start, end).trim();
+		rest = rest.slice(0, start) + rest.slice(end);
+	}
+
+	let contextText = "";
+	const contextIndex = rest.indexOf("# Project Context");
+	if (contextIndex >= 0) {
+		contextText = rest.slice(contextIndex).trim();
+		rest = rest.slice(0, contextIndex);
+	}
+
+	const baseText = [rest.trim(), footer].filter(Boolean).join("\n");
+	sections.push({ title: "System prompt", tokens: estimateTextTokens(baseText), content: baseText });
+	if (contextText) sections.push({ title: "Project context", tokens: estimateTextTokens(contextText), content: contextText });
+	if (skillsText) sections.push({ title: "Skills", tokens: estimateTextTokens(skillsText), content: skillsText });
+	return sections;
+}
+
+/** Build one collapsible section per active tool definition. */
+function buildToolSections(tools: ToolDef[]): ContextSection[] {
+	return tools.map((tool) => {
+		const lines: string[] = [];
+		if (tool.description) lines.push(tool.description.trim());
+		if (tool.parameters !== undefined) {
+			lines.push("", "Parameters:", safeStringify(tool.parameters));
+		}
+		const content = lines.join("\n");
+		const schemaText = `${tool.name}\n${tool.description ?? ""}\n${safeStringify(tool.parameters ?? {})}`;
+		return {
+			title: `tool: ${tool.name}${tool.source ? ` (${tool.source})` : ""}`,
+			tokens: estimateTextTokens(schemaText),
+			content: content || "(no schema)",
+		};
+	});
+}
+
+function safeStringify(value: unknown): string {
+	try {
+		return JSON.stringify(value, null, 2);
+	} catch {
+		return String(value);
+	}
+}
+
+function buildRecordedSnapshots(ctx: ExtensionContext, toolDefTokens: number): Snapshot[] {
 	const branch = ctx.sessionManager.getBranch();
 	const entries = ctx.sessionManager.getEntries() as SessionEntry[];
 	const byId = new Map(entries.map((entry) => [entry.id, entry]));
@@ -188,7 +308,7 @@ function buildRecordedSnapshots(ctx: ExtensionContext): Snapshot[] {
 		const toolDetails = extractToolDetails(branch, i);
 		const context = buildSessionContext(entries, entry.parentId ?? null, byId);
 		snapshots.push({
-			...buildSnapshot(context.messages, systemPrompt, turn, "recorded"),
+			...buildSnapshot(context.messages, systemPrompt, turn, "recorded", toolDefTokens),
 			turnPrice: extractTurnPrice(assistantMessage, ctx.model),
 			turnLabel: toolNames.length > 0 ? (toolNames.length === 1 ? "Tool call" : "Tool calls") : "User message",
 			summary: buildTurnSummary(lastUserText, toolNames),
@@ -201,10 +321,10 @@ function buildRecordedSnapshots(ctx: ExtensionContext): Snapshot[] {
 	return snapshots;
 }
 
-function buildLiveSnapshot(event: ContextEvent, ctx: ExtensionContext): Snapshot {
+function buildLiveSnapshot(event: ContextEvent, ctx: ExtensionContext, toolDefTokens: number): Snapshot {
 	const branch = ctx.sessionManager.getBranch();
 	const nextTurn = countAssistantMessages(branch) + 1;
-	const snapshot = buildSnapshot(event.messages, ctx.getSystemPrompt() ?? "", nextTurn, "live");
+	const snapshot = buildSnapshot(event.messages, ctx.getSystemPrompt() ?? "", nextTurn, "live", toolDefTokens);
 
 	let lastUserText = "";
 	for (let i = event.messages.length - 1; i >= 0; i--) {
@@ -219,19 +339,25 @@ function buildLiveSnapshot(event: ContextEvent, ctx: ExtensionContext): Snapshot
 	return snapshot;
 }
 
-function buildCurrentContextSnapshot(ctx: ExtensionContext): Snapshot {
+function buildCurrentContextSnapshot(ctx: ExtensionContext, toolDefTokens: number): Snapshot {
 	const entries = ctx.sessionManager.getEntries() as SessionEntry[];
 	const byId = new Map(entries.map((entry) => [entry.id, entry]));
 	const currentContext = buildSessionContext(entries, ctx.sessionManager.getLeafId(), byId);
 	const currentTurn = countAssistantMessages(ctx.sessionManager.getBranch());
-	return buildSnapshot(currentContext.messages, ctx.getSystemPrompt() ?? "", currentTurn, "recorded");
+	return buildSnapshot(currentContext.messages, ctx.getSystemPrompt() ?? "", currentTurn, "recorded", toolDefTokens);
 }
 
-function buildSnapshot(messages: AgentMessage[], systemPrompt: string, turn: number, source: Snapshot["source"]): Snapshot {
+function buildSnapshot(
+	messages: AgentMessage[],
+	systemPrompt: string,
+	turn: number,
+	source: Snapshot["source"],
+	toolDefTokens = 0,
+): Snapshot {
 	const snapshot: Snapshot = {
 		version: EXTENSION_SNAPSHOT_VERSION,
 		turn,
-		systemInstructions: estimateTextTokens(systemPrompt),
+		systemInstructions: estimateTextTokens(systemPrompt) + toolDefTokens,
 		userInput: 0,
 		agentOutput: 0,
 		tools: 0,

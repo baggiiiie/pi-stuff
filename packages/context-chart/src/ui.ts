@@ -445,10 +445,10 @@ export function renderHtml(initialPayload: ChartPayload): string {
 									const index = items[0]?.dataIndex;
 									const point = typeof index === 'number' ? currentPayload?.points[index] : undefined;
 									const total = items.reduce((sum, item) => sum + (item.raw || 0), 0);
-									return [
-										(chartType === 'bar' ? 'Total added  ' : 'Total  ') + fmt.format(total),
-										'Turn price  ' + formatPrice(point?.turnPrice),
-									];
+									const lines = [(chartType === 'bar' ? 'Total added  ' : 'Total  ') + fmt.format(total)];
+									if (point && point.turn > 0) lines.push('Turn price  ' + formatPrice(point.turnPrice));
+									else lines.push('Click to inspect base context');
+									return lines;
 								},
 							},
 						},
@@ -492,7 +492,7 @@ export function renderHtml(initialPayload: ChartPayload): string {
 			document.getElementById('sessionCost').textContent =
 				'Cache R' + formatTokens(payload.meta.usage.cacheRead) + ' • W' + formatTokens(payload.meta.usage.cacheWrite) +
 				(payload.meta.usage.cost > 0 ? ' • $' + payload.meta.usage.cost.toFixed(4) : '');
-			document.getElementById('turnCount').textContent = String(payload.points.length);
+			document.getElementById('turnCount').textContent = String(payload.points.filter((point) => point.turn > 0).length);
 			document.getElementById('sessionName').textContent = payload.meta.sessionName || 'Unnamed session';
 			document.getElementById('sessionFile').textContent = payload.meta.sessionFile || 'In-memory session';
 			document.getElementById('updatedAt').textContent = 'Updated ' + new Date(payload.meta.updatedAt).toLocaleTimeString();
@@ -534,6 +534,23 @@ export function renderHtml(initialPayload: ChartPayload): string {
 			const overlay = document.getElementById('detailOverlay');
 			const title = document.getElementById('detailTitle');
 			const body = document.getElementById('detailBody');
+			if (point.contextDetails && point.contextDetails.length > 0) {
+				title.textContent = 'Turn 0 — initial context';
+				body.innerHTML = point.contextDetails.map((section, i) =>
+					'<div class="tool-entry">' +
+						'<div class="tool-entry-header" onclick="toggleToolResult(' + i + ')">' +
+							'<span class="arrow" id="arrow-' + i + '">▶</span> ' +
+							escapeHtml(section.title) +
+							'<span style="margin-left:auto;color:var(--muted);">' + formatTokens(section.tokens) + ' tok</span>' +
+						'</div>' +
+						'<div class="tool-result" id="tool-result-' + i + '">' +
+							escapeHtml(section.content || '(empty)') +
+						'</div>' +
+					'</div>'
+				).join('');
+				overlay.classList.add('visible');
+				return;
+			}
 			title.textContent = 'Turn ' + point.turn + (point.summary ? ' — ' + point.summary : '');
 			const details = point.toolDetails || [];
 			if (details.length === 0) {

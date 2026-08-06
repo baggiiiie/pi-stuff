@@ -7,6 +7,7 @@ import {
 	computeSharedState,
 	formatTokens,
 	type SharedState,
+	type ToolDef,
 } from "./data.ts";
 import { buildFooterLines } from "./footer.ts";
 
@@ -19,13 +20,30 @@ export default function (pi: ExtensionAPI) {
 	let chartWindow: ChartWindow | null = null;
 	let tuiRef: { requestRender(): void } | null = null;
 
+	function getToolDefs(): ToolDef[] {
+		try {
+			const active = new Set(pi.getActiveTools());
+			return pi
+				.getAllTools()
+				.filter((tool) => active.has(tool.name))
+				.map((tool) => ({
+					name: tool.name,
+					description: tool.description,
+					parameters: tool.parameters,
+					source: tool.sourceInfo?.scope,
+				}));
+		} catch {
+			return [];
+		}
+	}
+
 	function ensureState(ctx: ExtensionContext, event?: ContextEvent): SharedState {
-		if (!state) state = computeSharedState(ctx, event);
+		if (!state) state = computeSharedState(ctx, event, getToolDefs());
 		return state;
 	}
 
 	function refresh(ctx: ExtensionContext, event?: ContextEvent) {
-		state = computeSharedState(ctx, event);
+		state = computeSharedState(ctx, event, getToolDefs());
 		if (chartWindow) chartWindow.publish(buildChartPayload(state, ctx));
 		if (footerRegistered && tuiRef) tuiRef.requestRender();
 	}

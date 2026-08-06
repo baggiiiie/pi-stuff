@@ -66,6 +66,17 @@ For the chart, each historical turn's snapshot is built by calling `buildSession
 
 Hovering a point also shows the assistant turn's price when pi has pricing data for that turn. If the provider/model has no usable price data, the tooltip shows `unavailable`.
 
+### Turn 0 (initial context)
+
+The chart always starts at **turn 0**, which represents everything already in the context window *before any user message*: the resolved system prompt, project context files, skills, and the tool definitions (JSON schemas) sent to the model. Click turn 0 in the chart to open a breakdown with collapsible sections and per-section token estimates:
+
+- **System prompt** — base instructions
+- **Project context** — `# Project Context` files, if any
+- **Skills** — the `<available_skills>` block, if any
+- **tool: `<name>`** — one section per active tool with its description and parameter schema
+
+Tool-definition tokens are folded into the **System** bucket for every turn (they are present in every request), so the system line stays consistent across turns.
+
 ### Cache hit rate
 
 The footer displays a prompt cache hit rate after the context breakdown. It is calculated as:
