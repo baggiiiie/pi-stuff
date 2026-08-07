@@ -151,15 +151,36 @@ export function buildChartPayload(state: SharedState, ctx: ExtensionContext): Ch
 
 export function buildFooterViewModel(state: SharedState): FooterViewModel {
 	const estimated = state.liveSnapshot ?? state.currentSnapshot;
-	const canTrustUsage = !state.liveSnapshot && typeof state.contextUsage?.tokens === "number";
-	const actualTokens = canTrustUsage ? state.contextUsage?.tokens ?? null : null;
-	const tokens = actualTokens ?? estimated.total;
-	const percent = canTrustUsage
-		? state.contextUsage?.percent ??
-		  (state.contextWindow && actualTokens !== null ? (actualTokens / state.contextWindow) * 100 : null)
-		: state.contextWindow && tokens > 0
-			? (tokens / state.contextWindow) * 100
-			: null;
+	const actualTokens = typeof state.contextUsage?.tokens === "number" ? state.contextUsage.tokens : null;
+
+	let tokens: number | null;
+	let percent: number | null;
+	let approximate: boolean;
+
+	if (!state.liveSnapshot && actualTokens !== null) {
+		// Idle: trust the exact prompt-token count reported by the last API response.
+		tokens = actualTokens;
+		percent =
+			state.contextUsage?.percent ??
+			(state.contextWindow ? (actualTokens / state.contextWindow) * 100 : null);
+		approximate = false;
+	} else if (state.liveSnapshot && actualTokens !== null) {
+		// Live turn: the real token count for the in-flight request isn't known yet.
+		// Local estimation systematically undercounts (it ignores provider-side message
+		// wrapping / tool-schema serialization overhead), so switching straight to the
+		// raw estimate makes the footer visibly drop the moment a message is sent.
+		// Calibrate the live estimate against the last trusted count using the offset
+		// between the actual count and our estimate of that same recorded context.
+		const offset = Math.max(0, actualTokens - state.currentSnapshot.total);
+		tokens = estimated.total + offset;
+		percent = state.contextWindow && tokens > 0 ? (tokens / state.contextWindow) * 100 : null;
+		approximate = true;
+	} else {
+		// No trusted usage yet (e.g. right after compaction): pure local estimate.
+		tokens = estimated.total;
+		percent = state.contextWindow && tokens > 0 ? (tokens / state.contextWindow) * 100 : null;
+		approximate = true;
+	}
 
 	const breakdown: FooterBreakdown = {
 		systemInstructions: estimated.systemInstructions,
@@ -169,7 +190,7 @@ export function buildFooterViewModel(state: SharedState): FooterViewModel {
 		memory: estimated.memory,
 		total: estimated.total,
 		turns: countTurns(state),
-		approximate: !canTrustUsage,
+		approximate,
 		source: estimated.source,
 	};
 
