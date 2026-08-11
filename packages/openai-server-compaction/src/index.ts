@@ -88,11 +88,14 @@ export default function serverCompaction(pi: ExtensionAPI): void {
         requestTemplate: ordinaryRequest?.compatibility === compatibility ? ordinaryRequest.payload : undefined,
       });
       const artifact: ServerCompactionArtifact = { version: 1, provider: "openai-codex", baseUrl: normalizedBaseUrl(model.baseUrl), model: model.id, api: "openai-codex-responses", outputItems: [item] };
+      const encChars = typeof item.encrypted_content === "string" ? item.encrypted_content.length : 0;
+      ctx.ui?.notify?.(`Native Codex server compaction applied (${event.preparation.tokensBefore} tokens \u2192 encrypted artifact, ${encChars} chars).`, "info");
       return { compaction: { summary: PLACEHOLDER, firstKeptEntryId: event.preparation.firstKeptEntryId, tokensBefore: event.preparation.tokensBefore, details: { openaiServerCompaction: artifact } } };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      ctx.ui.notify(`Native Codex compaction failed: ${message}`, "error");
-      return { cancel: true };
+      // Do not fail closed: let Pi run its normal text summarizer instead of cancelling.
+      ctx.ui?.notify?.(`Native Codex compaction failed, falling back to Pi's text summary: ${message}`, "warning");
+      return;
     }
   });
 
@@ -128,7 +131,12 @@ export default function serverCompaction(pi: ExtensionAPI): void {
         };
       }
       return result;
-    } catch { pending = undefined; return safeFailure(event.payload); }
+    } catch (error) {
+      pending = undefined;
+      const message = error instanceof Error ? error.message : String(error);
+      ctx.ui?.notify?.(`Native Codex compaction artifact could not be applied to the request: ${message}`, "error");
+      return safeFailure(event.payload);
+    }
   });
 }
 

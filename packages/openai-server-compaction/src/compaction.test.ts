@@ -234,7 +234,7 @@ describe("hook integration", () => {
     expect(result.model).toContain("fail_closed");
   });
 
-  it("cancels on remote failure so Pi cannot run its normal summarizer", async () => {
+  it("falls back to Pi's text summarizer on remote failure", async () => {
     const handlers = new Map<string, Function>();
     serverCompaction({ on: (name: string, handler: Function) => handlers.set(name, handler) } as any);
     const notify = vi.fn();
@@ -245,7 +245,7 @@ describe("hook integration", () => {
       modelRegistry: { getApiKeyAndHeaders: async () => ({ ok: false, error: "no auth" }) },
     };
     const result = await handlers.get("session_before_compact")!({ preparation: {}, branchEntries: [], signal: new AbortController().signal }, ctx);
-    expect(result).toEqual({ cancel: true });
-    expect(notify).toHaveBeenCalledWith(expect.stringContaining("no auth"), "error");
+    expect(result).toBeUndefined();
+    expect(notify).toHaveBeenCalledWith(expect.stringContaining("no auth"), "warning");
   });
 });
