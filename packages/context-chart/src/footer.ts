@@ -71,10 +71,15 @@ function buildModelLabel(ctx: ExtensionContext, availableProviderCount: number, 
 }
 
 function joinLeftRight(left: string, right: string, width: number): string {
+	if (width <= 0) return "";
+	// If the right side alone does not fit, truncate it and drop the left entirely.
+	if (visibleWidth(right) >= width) {
+		return truncateToWidth(right, width, "");
+	}
 	const leftWidth = visibleWidth(left);
 	const rightWidth = visibleWidth(right);
 	if (leftWidth + 2 + rightWidth <= width) {
-		return left + " ".repeat(Math.max(1, width - leftWidth - rightWidth)) + right;
+		return left + " ".repeat(width - leftWidth - rightWidth) + right;
 	}
 	const availableLeft = Math.max(1, width - rightWidth - 1);
 	const truncatedLeft = truncateToWidth(left, availableLeft, "");
