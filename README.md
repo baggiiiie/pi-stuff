@@ -9,7 +9,6 @@ Available packages:
 - `@baggiiiie/pi-goal`: Codex-style persisted goals with `/goal` controls and model tools to keep working until done
 - `@baggiiiie/pi-no-ansi`: keeps pi `bash` tool output clean for the model by disabling color and stripping ANSI escapes
 - `@baggiiiie/pi-openai-server-compaction`: uses native encrypted Codex server-side compaction for supported models
-- `@baggiiiie/pi-rtk-rewrite`: proxies pi `bash` tool calls through [rtk](https://github.com/rtk-ai/rtk) before execution
 
 ## Install 
 
@@ -26,7 +25,6 @@ pi install npm:@baggiiiie/pi-context-status
 pi install npm:@baggiiiie/pi-goal
 pi install npm:@baggiiiie/pi-no-ansi
 pi install npm:@baggiiiie/pi-openai-server-compaction
-pi install npm:@baggiiiie/pi-rtk-rewrite
 pi install npm:@baggiiiie/pi-codex-usage
 ```
 
@@ -152,30 +150,4 @@ Uses Codex's native encrypted server-side compaction for Pi's `openai-codex` mod
 pi install npm:@baggiiiie/pi-openai-server-compaction
 ```
 
-### `@baggiiiie/pi-rtk-rewrite`
 
-Rewrites Pi `bash` tool calls through [RTK](https://github.com/rtk-ai/rtk) before execution.
-
-![pi-rtk-rewrite screenshot](docs/pi-rtk-rewrite.png)
-
-Commands:
-
-```text
-/rtk-rewrite
-/rtk-rewrite status
-/rtk-rewrite on
-/rtk-rewrite off
-/rtk-rewrite refresh
-/rtk-rewrite test git status
-```
-
-Install individually:
-
-```bash
-pi install npm:@baggiiiie/pi-rtk-rewrite
-```
-
-Notes:
-- Install RTK separately and make sure `rtk rewrite` works in your shell.
-- Only Pi `bash` tool calls are rewritten.
-- If RTK fails or has no rewrite, the original command still runs.
