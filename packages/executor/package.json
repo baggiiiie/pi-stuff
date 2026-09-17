@@ -1,10 +1,27 @@
 {
   "name": "@baggiiiie/pi-executor",
-  "version": "0.0.2",
-  "description": "Run TypeScript against Executor integrations from Pi",
+  "version": "0.1.0",
+  "description": "Connect Pi to Executor code mode over MCP",
   "type": "module",
   "files": ["src", "README.md", "LICENSE"],
-  "keywords": ["pi-package", "executor", "integrations", "tools"],
+  "keywords": ["pi-package", "pi", "executor", "mcp", "integrations"],
+  "author": "yingchao",
+  "license": "MIT",
+  "homepage": "https://github.com/baggiiiie/pi-stuff/tree/main/packages/executor#readme",
+  "bugs": {
+    "url": "https://github.com/baggiiiie/pi-stuff/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/baggiiiie/pi-stuff.git",
+    "directory": "packages/executor"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  },
   "pi": {
     "extensions": ["./src/executor.ts"]
   },
