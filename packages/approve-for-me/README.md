@@ -23,6 +23,19 @@ If human review is required in print or JSON mode, the command is blocked becaus
 there is no interactive UI. Classifier errors never cause a command to run
 automatically.
 
+## UI
+
+In Pi's interactive TUI, the footer shows transient review state:
+
+- `◌ TypeSafe reviewing command…`
+- `◌ TypeSafe reviewing context · fast risk 82%`
+- `! TypeSafe awaiting human approval`
+- `✓ TypeSafe allowed · risk 8%` or `✗ TypeSafe blocked by human`
+
+Final allow/block statuses clear after 1.5 seconds. Concurrent reviews collapse
+to a single count. Human approval still uses Pi's confirmation dialog; print,
+JSON, and RPC modes do not receive the footer indicator.
+
 ## Install
 
 ```bash

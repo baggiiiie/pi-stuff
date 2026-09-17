@@ -21,6 +21,7 @@ import {
   type QuickRiskScore,
   type ReviewerConfig,
 } from "./typesafe-reviewer.ts";
+import { ReviewStatus } from "./status.ts";
 
 const REVIEW_ENTRY_TYPE = "approve-for-me-review-v2";
 const DEFAULT_MODEL = "jev-latest";
@@ -98,8 +99,8 @@ export function installGuardianApprovalExtension(pi: ExtensionAPI): void {
     guardian.startScoring(event, ctx);
   });
   pi.on("tool_call", (event, ctx) => guardian.reviewToolCall(event, ctx));
-  pi.on("tool_execution_end", (event) => {
-    guardian.finishToolCall(event.toolCallId);
+  pi.on("tool_execution_end", (event, ctx) => {
+    guardian.finishToolCall(event.toolCallId, ctx);
   });
   pi.on("session_shutdown", () => {
     guardian.dispose();
@@ -134,6 +135,7 @@ export function createGuardianRuntime(
 export class GuardianRuntime {
   private readonly pendingScores = new Map<string, PendingScore>();
   private readonly reviews: ReviewEvidence[] = [];
+  private readonly status = new ReviewStatus();
   private readonly config: ApproveForMeConfig;
   private readonly client?: EvaluationClient;
   private readonly setupError?: Error;
@@ -188,7 +190,8 @@ export class GuardianRuntime {
     const action = getBashAction(event.args);
     if (!action || action.command.length > this.config.maxCommandChars) return;
 
-    this.finishToolCall(event.toolCallId);
+    this.finishToolCall(event.toolCallId, ctx);
+    this.status.reviewingCommand(event.toolCallId, ctx);
     this.pendingScores.set(
       event.toolCallId,
       this.createPendingScore(action, ctx, this.client),
@@ -205,6 +208,7 @@ export class GuardianRuntime {
     const { command } = action;
 
     if (this.breakerTripped) {
+      this.status.blocked(event.toolCallId, ctx);
       return {
         block: true,
         terminate: true,
@@ -214,6 +218,7 @@ export class GuardianRuntime {
     }
 
     if (ctx.signal?.aborted) {
+      this.status.cancelled(event.toolCallId, ctx);
       return block("Bash command blocked because safety review was cancelled.");
     }
 
@@ -222,6 +227,7 @@ export class GuardianRuntime {
     let forceFreshReview = false;
 
     if (command.length > this.config.maxCommandChars) {
+      this.status.blocked(event.toolCallId, ctx);
       return block(
         `Bash command blocked because its complete text cannot be inspected safely (${command.length} characters; limit ${this.config.maxCommandChars}).`,
       );
@@ -230,6 +236,7 @@ export class GuardianRuntime {
         "TYPESAFE_API_KEY is not set. Export it before starting Pi.",
       );
     } else {
+      this.status.reviewingCommand(event.toolCallId, ctx);
       const pending =
         this.pendingScores.get(event.toolCallId) ??
         this.createPendingScore(action, ctx, this.client);
@@ -243,6 +250,7 @@ export class GuardianRuntime {
       } else {
         const result = await pending.result;
         if (ctx.signal?.aborted) {
+          this.status.cancelled(event.toolCallId, ctx);
           return block(
             "Bash command blocked because safety review was cancelled.",
           );
@@ -262,6 +270,11 @@ export class GuardianRuntime {
     ) {
       this.recordReview(ctx, action, "auto_allowed", quickScore, "none", false);
       this.recordNonDenial();
+      this.status.allowed(
+        event.toolCallId,
+        ctx,
+        quickScore.dangerousProbability,
+      );
       freezeApprovedEvent(event);
       return undefined;
     }
@@ -269,6 +282,11 @@ export class GuardianRuntime {
     let freshReview: FreshReview | undefined;
     let freshError = quickError;
     if (this.client && command.length <= this.config.maxCommandChars) {
+      this.status.reviewingContext(
+        event.toolCallId,
+        ctx,
+        quickScore?.dangerousProbability,
+      );
       try {
         const beforeReviewAuthorization = authorizationFingerprint(ctx);
         const currentContext = this.buildContext(ctx, action);
@@ -280,6 +298,7 @@ export class GuardianRuntime {
         );
         freshError = undefined;
         if (ctx.signal?.aborted) {
+          this.status.cancelled(event.toolCallId, ctx);
           return block(
             "Bash command blocked because safety review was cancelled.",
           );
@@ -296,6 +315,7 @@ export class GuardianRuntime {
         }
       } catch (error) {
         if (ctx.signal?.aborted) {
+          this.status.cancelled(event.toolCallId, ctx);
           return block(
             "Bash command blocked because safety review was cancelled.",
           );
@@ -314,11 +334,17 @@ export class GuardianRuntime {
         false,
       );
       this.recordNonDenial();
+      this.status.allowed(
+        event.toolCallId,
+        ctx,
+        freshReview.dangerousProbability,
+      );
       freezeApprovedEvent(event);
       return undefined;
     }
 
     if (!ctx.hasUI) {
+      this.status.blocked(event.toolCallId, ctx);
       return block(
         freshReview
           ? formatHeadlessBlockedReason(quickScore, freshReview)
@@ -328,6 +354,11 @@ export class GuardianRuntime {
 
     const promptedActionHash = actionFingerprint(action);
     const promptedAuthorizationHash = authorizationFingerprint(ctx);
+    this.status.awaitingHuman(
+      event.toolCallId,
+      ctx,
+      freshReview === undefined,
+    );
     let approved = false;
     try {
       approved = await ctx.ui.confirm(
@@ -347,12 +378,14 @@ export class GuardianRuntime {
         ),
       );
     } catch (error) {
+      this.status.blocked(event.toolCallId, ctx);
       return block(
         `Bash command blocked because the human approval prompt failed: ${safeErrorMessage(asError(error))}`,
       );
     }
 
     if (ctx.signal?.aborted) {
+      this.status.cancelled(event.toolCallId, ctx);
       return block("Bash command blocked because execution was cancelled.");
     }
     if (
@@ -361,6 +394,7 @@ export class GuardianRuntime {
         promptedActionHash !==
           actionFingerprint(getBashAction(event.input) ?? action))
     ) {
+      this.status.blocked(event.toolCallId, ctx);
       return block(
         "Bash command blocked because its action or authorization changed while human approval was pending.",
       );
@@ -376,6 +410,7 @@ export class GuardianRuntime {
         true,
       );
       this.recordNonDenial();
+      this.status.allowed(event.toolCallId, ctx, undefined, true);
       freezeApprovedEvent(event);
       return undefined;
     }
@@ -394,6 +429,7 @@ export class GuardianRuntime {
       this.breakerTripped = true;
       ctx.abort();
     }
+    this.status.blocked(event.toolCallId, ctx, true);
     const reviewSummary = freshReview
       ? `The isolated reviewer recommended ${formatLabel(freshReview.recommendation)} with ${formatPercent(freshReview.recommendationConfidence)} confidence.`
       : `Automatic review was unavailable: ${safeErrorMessage(freshError)}`;
@@ -410,10 +446,14 @@ export class GuardianRuntime {
     };
   }
 
-  finishToolCall(toolCallId: string): void {
+  finishToolCall(
+    toolCallId: string,
+    ctx?: Pick<ExtensionContext, "mode" | "ui">,
+  ): void {
     const pending = this.pendingScores.get(toolCallId);
     pending?.controller.abort();
     this.pendingScores.delete(toolCallId);
+    if (ctx) this.status.clearActive(toolCallId, ctx);
   }
 
   dispose(): void {
@@ -421,6 +461,7 @@ export class GuardianRuntime {
       pending.controller.abort();
     }
     this.pendingScores.clear();
+    this.status.dispose();
   }
 
   private createPendingScore(

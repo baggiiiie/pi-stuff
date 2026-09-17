@@ -34,15 +34,19 @@ function context({
   branch = [],
   entries = branch,
   trusted = true,
+  mode = "rpc",
 } = {}) {
   const confirmations = [];
   const aborts = [];
+  const statuses = [];
   return {
     confirmations,
     aborts,
+    statuses,
     ctx: {
       cwd: "/tmp/project",
       hasUI,
+      mode,
       signal: undefined,
       model: { provider: "test-provider", id: "test-model" },
       isProjectTrusted: () => trusted,
@@ -53,6 +57,7 @@ function context({
         getEntries: () => entries,
       },
       ui: {
+        setStatus: (...args) => statuses.push(args),
         confirm: async (...args) => {
           confirmations.push(args);
           return approved;
@@ -269,6 +274,26 @@ test("a fresh low-risk score auto-allows without synchronous review", async () =
     evaluator.calls[0][0].state.action.command,
     "git status --short",
   );
+});
+
+test("the TUI footer shows review progress and the final decision", async () => {
+  const evaluator = client([
+    quick({ probability: 0.8 }),
+    fresh({ decision: "require_human", dangerous: 0.8 }),
+  ]);
+  const deniedContext = context({ approved: false, mode: "tui" });
+  const runtime = createGuardianRuntime({ config, client: evaluator });
+
+  await invoke(runtime, deniedContext.ctx, "npm publish");
+
+  const messages = deniedContext.statuses.map(([, message]) => message);
+  assert.ok(messages.includes("◌ TypeSafe reviewing command…"));
+  assert.ok(
+    messages.includes("◌ TypeSafe reviewing context · fast risk 80%"),
+  );
+  assert.ok(messages.includes("! TypeSafe awaiting human approval"));
+  assert.ok(messages.includes("✗ TypeSafe blocked by human"));
+  runtime.dispose();
 });
 
 test("elevated fast risk receives a fresh context-aware review", async () => {
