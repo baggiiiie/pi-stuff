@@ -1,0 +1,20 @@
+{
+  "name": "@baggiiiie/pi-approve-for-me",
+  "version": "0.0.1",
+  "description": "TypeSafe-powered human approval gate for risky Pi bash commands",
+  "type": "module",
+  "files": ["src", "README.md", "LICENSE"],
+  "keywords": ["pi-package", "security", "approval", "typesafe-ai"],
+  "pi": {
+    "extensions": ["./src/approve-for-me.ts"]
+  },
+  "dependencies": {
+    "@typesafe-ai/sdk": "^0.6.0"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "scripts": {
+    "test": "node --test src/approve-for-me.test.js"
+  }
+}

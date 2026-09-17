@@ -3,6 +3,7 @@
 My small collection of [pi](https://github.com/badlogic/pi-mono) extension packages, only made possible by the incredible work of art from Mario.
 
 Available packages:
+- `@baggiiiie/pi-approve-for-me`: uses TypeSafe to auto-run low-risk bash commands and require human approval for elevated risk
 - `@baggiiiie/pi-codex-usage`: shows Codex usage with a command and status widget
 - `@baggiiiie/pi-context-chart`: opens a live context usage chart to see which turn blew up current context window
 - `@baggiiiie/pi-context-status`: shows current context-window usage in Pi's status line or a custom footer
@@ -26,9 +27,26 @@ pi install npm:@baggiiiie/pi-goal
 pi install npm:@baggiiiie/pi-no-ansi
 pi install npm:@baggiiiie/pi-openai-server-compaction
 pi install npm:@baggiiiie/pi-codex-usage
+pi install npm:@baggiiiie/pi-approve-for-me
 ```
 
 ## Packages
+
+### `@baggiiiie/pi-approve-for-me`
+
+Uses TypeSafe to review every model-generated `bash` tool call. Low-risk
+commands run automatically; elevated-risk commands require explicit human
+approval. Classification failures also fall back to human review, and commands
+that need review are blocked in non-interactive modes.
+
+Install individually:
+
+```bash
+pi install npm:@baggiiiie/pi-approve-for-me
+```
+
+Set `TYPESAFE_API_KEY` before starting Pi. See the
+[package README](packages/approve-for-me/README.md) for policy and configuration.
 
 ### `@baggiiiie/pi-context-chart`
 
