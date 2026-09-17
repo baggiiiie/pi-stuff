@@ -350,8 +350,20 @@ test("a risky fresh review requires explicit human approval", async () => {
 
   assert.equal(result, undefined);
   assert.equal(approvedContext.confirmations.length, 1);
-  assert.match(approvedContext.confirmations[0][1], /Reviewer recommendation/);
-  assert.match(approvedContext.confirmations[0][1], /Explicitly authorized/);
+  assert.equal(
+    approvedContext.confirmations[0][0],
+    "Human attention required",
+  );
+  assert.match(
+    approvedContext.confirmations[0][1],
+    /TypeSafe deems this command to need human attention/,
+  );
+  assert.match(approvedContext.confirmations[0][1], /Goal alignment: 90%/);
+  assert.match(approvedContext.confirmations[0][1], /Context sufficiency: 90%/);
+  assert.doesNotMatch(
+    approvedContext.confirmations[0][1],
+    /Dangerous-risk|Primary hazard|Explicitly authorized/,
+  );
 });
 
 test("human approval is rejected if authorization changes during the prompt", async () => {
@@ -444,7 +456,7 @@ test("classifier failures fall back to human review", async () => {
   assert.equal(evaluator.calls.length, 2);
   assert.equal(
     approvedContext.confirmations[0][0],
-    "Safety review unavailable",
+    "Human attention required",
   );
   assert.match(approvedContext.confirmations[0][1], /service overloaded/);
 });
@@ -510,7 +522,7 @@ test("a command mutation invalidates the fast score", async () => {
   assert.equal(evaluator.calls.length, 2);
   assert.match(
     approvedContext.confirmations[0][1],
-    /fast score was not reused/,
+    /TypeSafe deems this command to need human attention/,
   );
 });
 

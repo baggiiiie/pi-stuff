@@ -33,8 +33,9 @@ In Pi's interactive TUI, the footer shows transient review state:
 - `✓ TypeSafe allowed · risk 8%` or `✗ TypeSafe blocked by human`
 
 Final allow/block statuses clear after 1.5 seconds. Concurrent reviews collapse
-to a single count. Human approval still uses Pi's confirmation dialog; print,
-JSON, and RPC modes do not receive the footer indicator.
+to a single count. Human approval uses a compact confirmation dialog with goal
+alignment, context sufficiency, working directory, and the exact command.
+Print, JSON, and RPC modes do not receive the footer indicator.
 
 ## Install
 

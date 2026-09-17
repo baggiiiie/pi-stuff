@@ -1,28 +1,35 @@
 {
-  "name": "@baggiiiie/pi-approve-for-me",
-  "version": "0.0.2",
-  "description": "TypeSafe-powered human approval gate for risky Pi bash commands",
-  "type": "module",
-  "files": [
-    "src/approve-for-me.ts",
-    "src/context.ts",
-    "src/guardian.ts",
-    "src/status.ts",
-    "src/typesafe-reviewer.ts",
-    "README.md",
-    "LICENSE"
-  ],
-  "keywords": ["pi-package", "security", "approval", "typesafe-ai"],
-  "pi": {
-    "extensions": ["./src/approve-for-me.ts"]
-  },
-  "dependencies": {
-    "@typesafe-ai/sdk": "^0.6.0"
-  },
-  "peerDependencies": {
-    "@earendil-works/pi-coding-agent": ">=0.79.9"
-  },
-  "scripts": {
-    "test": "node --test src/approve-for-me.test.js"
-  }
+    "name": "@baggiiiie/pi-approve-for-me",
+    "version": "0.0.3",
+    "description": "TypeSafe-powered human approval gate for risky Pi bash commands",
+    "type": "module",
+    "files": [
+        "src/approve-for-me.ts",
+        "src/context.ts",
+        "src/guardian.ts",
+        "src/status.ts",
+        "src/typesafe-reviewer.ts",
+        "README.md",
+        "LICENSE"
+    ],
+    "keywords": [
+        "pi-package",
+        "security",
+        "approval",
+        "typesafe-ai"
+    ],
+    "pi": {
+        "extensions": [
+            "./src/approve-for-me.ts"
+        ]
+    },
+    "dependencies": {
+        "@typesafe-ai/sdk": "^0.6.0"
+    },
+    "peerDependencies": {
+        "@earendil-works/pi-coding-agent": ">=0.79.9"
+    },
+    "scripts": {
+        "test": "node --test src/approve-for-me.test.js"
+    }
 }
