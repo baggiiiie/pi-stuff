@@ -34,10 +34,11 @@ pi install npm:@baggiiiie/pi-approve-for-me
 
 ### `@baggiiiie/pi-approve-for-me`
 
-Uses TypeSafe to review every model-generated `bash` tool call. Low-risk
-commands run automatically; elevated-risk commands require explicit human
-approval. Classification failures also fall back to human review, and commands
-that need review are blocked in non-interactive modes.
+Uses a Codex Guardian-style two-stage TypeSafe review for every model-generated
+`bash` tool call. It evaluates a bounded conversation/tool transcript, reuses
+only fresh action-bound risk scores, and runs a fresh reviewer for elevated or
+invalidated risk. Low-risk commands run automatically; unresolved risk requires
+explicit human approval.
 
 Install individually:
 
