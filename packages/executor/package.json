@@ -9,8 +9,7 @@
     "extensions": ["./src/executor.ts"]
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.30.0",
-    "executor": "^1.5.37"
+    "@modelcontextprotocol/sdk": "^1.30.0"
   },
   "peerDependencies": {
     "@earendil-works/pi-ai": "*",

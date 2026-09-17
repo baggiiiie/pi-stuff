@@ -14,51 +14,48 @@ Executor keeps integration credentials and policies. The TypeScript runs in
 Executor's QuickJS sandbox, where network access is available only through the
 `tools.*` proxy.
 
-Executor tools are disabled in every fresh Pi session by default. Enable them when needed:
-
-```text
-/use-executor
-```
-
-To enable them automatically when Pi starts, launch it with:
-
-```bash
-PI_EXECUTOR=1 pi
-```
-
 ## Install
 
 ```bash
 pi install npm:@baggiiiie/pi-executor
 ```
 
-The package installs the Executor CLI and MCP client as runtime dependencies.
-Open Executor and add an integration:
+## Configure
 
-```text
-/executor open
+Create `~/.pi/agent/extensions/pi-executor.json`:
+
+```json
+{
+  "url": "http://localhost:4789",
+  "authToken": "your-executor-token"
+}
 ```
 
-Or configure it outside Pi:
+`url` may be either the Executor origin or its full `/mcp` URL. The extension
+adds `/mcp` when needed, sends the token as `Authorization: Bearer ...`, and
+connects with MCP Streamable HTTP. Restart Pi after changing the file.
+
+The config follows Pi's agent directory, so `PI_CODING_AGENT_DIR` changes its
+location. Because it contains a credential, restrict its permissions:
 
 ```bash
-executor install
-executor web
+chmod 600 ~/.pi/agent/extensions/pi-executor.json
 ```
 
-## Pi tools
+## Pi tool
 
-After `/use-executor`, Pi can call:
+The extension adds one tool, `executor`, and enables it as soon as Pi loads:
 
-- `executor` — run TypeScript in Executor's QuickJS sandbox
-- `executor_skill` — fetch Executor's current code-mode guide
-- `executor_resume` — resume code paused for authentication, approval, or form input
+- `{ code }` — run TypeScript in Executor's QuickJS sandbox
+- `{ operation: "skill", name? }` — fetch the current code-mode guide
+- `{ operation: "resume", executionId, ... }` — continue a paused execution
 
 Typical flow:
 
-1. Call `executor_skill({ name: "execute" })` once for the current workflow.
+1. Call `executor({ operation: "skill", name: "execute" })` once for the current workflow.
 2. Call `executor({ code })` with a TypeScript program.
-3. If it pauses, follow the returned instructions and call `executor_resume`.
+3. If it pauses, follow the returned instructions and call
+   `executor({ operation: "resume", executionId, ... })`.
 
 Example program:
 
@@ -91,51 +88,8 @@ program explicitly returns them.
 ## Commands
 
 ```text
-/use-executor              Enable code-mode tools for this session
-/use-executor off          Disable them again
-/use-executor status       Show whether they are active
-/executor                  Show CLI and target status
-/executor integrations     List configured integrations
-/executor open             Open the Executor web UI
-/executor help             Show configuration help
+/executor                  Show the configured MCP target
+/executor help             Show the config path and expected shape
 ```
-
-## Local and remote targets
-
-With no configuration, the extension launches the bundled CLI as an MCP stdio
-server using:
-
-```bash
-executor mcp --elicitation-mode model --no-artifacts
-```
-
-For Executor Cloud or a self-hosted instance, select a named CLI profile. The
-extension reads that profile's origin and stored bearer, basic, or OAuth access
-token, then connects to its `/mcp` endpoint:
-
-```bash
-executor server add work https://your-executor.example
-executor login --server work
-PI_EXECUTOR_SERVER=work pi
-```
-
-You can also provide an origin directly. Authentication comes from a matching
-saved profile, `EXECUTOR_API_KEY`, `EXECUTOR_AUTH_TOKEN`, or the local Executor
-`auth.json` when connecting to loopback:
-
-```bash
-PI_EXECUTOR_BASE_URL=http://127.0.0.1:4788 pi
-```
-
-## Environment
-
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `PI_EXECUTOR` | unset | Set to `1` to enable Executor tools when Pi starts |
-| `PI_EXECUTOR_BASE_URL` | unset | HTTP Executor origin; otherwise use local stdio MCP |
-| `PI_EXECUTOR_SERVER` | unset | Named Executor server profile |
-| `PI_EXECUTOR_SCOPE` | unset | Workspace containing `executor.jsonc` for local MCP |
-| `PI_EXECUTOR_BIN` | bundled CLI | Alternate Executor executable |
-| `PI_EXECUTOR_TIMEOUT_MS` | `120000` | Per-execution timeout; `0` uses the maximum timer interval |
 
 Executor requires Node.js 20 or newer.
