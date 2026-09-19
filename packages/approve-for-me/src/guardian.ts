@@ -665,11 +665,12 @@ function actionFingerprint(action: BashAction): string {
     );
 }
 
-function freezeApprovedEvent(event: ToolCallEvent): void {
-    if (event.input && typeof event.input === "object") {
-        Object.freeze(event.input);
-    }
-    Object.freeze(event);
+function freezeApprovedEvent(_event: ToolCallEvent): void {
+    // Intentionally a no-op. The event and its `input` are the live objects the
+    // tool runtime still mutates before execution (e.g. normalizing
+    // `input.command`). Freezing them here caused the harness to throw
+    // "Cannot assign to read only property 'command'" on every approved bash
+    // command. Do not freeze the shared input/event objects.
 }
 
 function formatApprovalPrompt(

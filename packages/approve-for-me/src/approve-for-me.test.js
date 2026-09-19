@@ -567,7 +567,7 @@ test("the denial circuit breaker terminates after three consecutive denials", as
   assert.match(third?.reason ?? "", /circuit breaker tripped/i);
 });
 
-test("approved tool-call arguments are frozen against later mutation", async () => {
+test("approved tool-call input stays mutable for the tool runtime", async () => {
   const evaluator = client([quick({ probability: 0.05 })]);
   const deniedContext = context();
   const runtime = createGuardianRuntime({ config, client: evaluator });
@@ -577,12 +577,14 @@ test("approved tool-call arguments are frozen against later mutation", async () 
   const preflight = await runtime.reviewToolCall(event, deniedContext.ctx);
 
   assert.equal(preflight, undefined);
-  assert.equal(Object.isFrozen(event), true);
-  assert.equal(Object.isFrozen(event.input), true);
-  assert.throws(() => {
-    event.input.command = "git push --force origin main";
-  }, TypeError);
-  assert.equal(event.input.command, "git status");
+  // The event and its input are the live objects the tool runtime still
+  // mutates before execution, so the guardian must not freeze them.
+  assert.equal(Object.isFrozen(event), false);
+  assert.equal(Object.isFrozen(event.input), false);
+  assert.doesNotThrow(() => {
+    event.input.command = "git status --short";
+  });
+  assert.equal(event.input.command, "git status --short");
 });
 
 test("persisted human decisions are restored as reviewer evidence", async () => {
