@@ -99,7 +99,10 @@ class CodexUsageEditor extends CustomEditor {
         isUsageActive: () => boolean,
         onDismiss: () => void,
     ) {
-        super(tui, theme, keybindings);
+        // embedWorkingStatus makes pi render the "Working" indicator inside the
+        // editor's top border (like the default editor) instead of as a separate
+        // row above the input box.
+        super(tui, theme, keybindings, { embedWorkingStatus: true } as ConstructorParameters<typeof CustomEditor>[3]);
         this.isUsageActive = isUsageActive;
         this.onDismiss = onDismiss;
     }
