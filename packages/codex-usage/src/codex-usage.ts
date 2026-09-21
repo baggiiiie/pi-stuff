@@ -221,12 +221,14 @@ export default function (pi: ExtensionAPI) {
         },
     });
 
-    pi.on("session_start", async (_event, ctx) => {
+    pi.on("session_start", (_event, ctx) => {
         ctx.ui.setEditorComponent((tui, theme, keybindings) =>
             new CodexUsageEditor(tui, theme, keybindings, () => isUsageActive, () => closeUsageWidget(ctx)),
         );
         startAutoRefresh(ctx);
-        await refreshUsage(ctx, { showLoading: true });
+        // Don't await: the usage fetch hits the network, and awaiting here blocks
+        // the first turn (and its "Working" indicator) until it resolves.
+        void refreshUsage(ctx, { showLoading: true });
     });
 
     pi.on("session_shutdown", (_event, ctx) => {
