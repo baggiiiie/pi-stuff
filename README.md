@@ -5,13 +5,13 @@
 My small collection of [pi](https://github.com/badlogic/pi-mono) extension packages, only made possible by the incredible work of art from Mario.
 
 Available packages:
+- `@baggiiiie/pi-approve-for-me`: uses TypeSafe to auto-run low-risk bash commands and require human approval for elevated risk
 - `@baggiiiie/pi-codex-usage`: shows Codex usage with a command and status widget
 - `@baggiiiie/pi-context-chart`: opens a live context usage chart to see which turn blew up current context window
 - `@baggiiiie/pi-context-status`: shows current context-window usage in Pi's status line or a custom footer
 - `@baggiiiie/pi-goal`: Codex-style persisted goals with `/goal` controls and model tools to keep working until done
 - `@baggiiiie/pi-no-ansi`: keeps pi `bash` tool output clean for the model by disabling color and stripping ANSI escapes
 - `@baggiiiie/pi-openai-server-compaction`: uses native encrypted Codex server-side compaction for supported models
-- `@baggiiiie/pi-rtk-rewrite`: proxies pi `bash` tool calls through [rtk](https://github.com/rtk-ai/rtk) before execution
 
 ## Install 
 
@@ -28,11 +28,28 @@ pi install npm:@baggiiiie/pi-context-status
 pi install npm:@baggiiiie/pi-goal
 pi install npm:@baggiiiie/pi-no-ansi
 pi install npm:@baggiiiie/pi-openai-server-compaction
-pi install npm:@baggiiiie/pi-rtk-rewrite
 pi install npm:@baggiiiie/pi-codex-usage
+pi install npm:@baggiiiie/pi-approve-for-me
 ```
 
 ## Packages
+
+### `@baggiiiie/pi-approve-for-me`
+
+Uses a Codex Guardian-style two-stage TypeSafe review for every model-generated
+`bash` tool call. It evaluates a bounded conversation/tool transcript, reuses
+only fresh action-bound risk scores, and runs a fresh reviewer for elevated or
+invalidated risk. Low-risk commands run automatically; unresolved risk requires
+explicit human approval.
+
+Install individually:
+
+```bash
+pi install npm:@baggiiiie/pi-approve-for-me
+```
+
+Set `TYPESAFE_API_KEY` before starting Pi. See the
+[package README](packages/approve-for-me/README.md) for policy and configuration.
 
 ### `@baggiiiie/pi-context-chart`
 
@@ -161,26 +178,3 @@ Notes:
 
 Rewrites Pi `bash` tool calls through [RTK](https://github.com/rtk-ai/rtk) before execution.
 
-![pi-rtk-rewrite screenshot](docs/pi-rtk-rewrite.png)
-
-Commands:
-
-```text
-/rtk-rewrite
-/rtk-rewrite status
-/rtk-rewrite on
-/rtk-rewrite off
-/rtk-rewrite refresh
-/rtk-rewrite test git status
-```
-
-Install individually:
-
-```bash
-pi install npm:@baggiiiie/pi-rtk-rewrite
-```
-
-Notes:
-- Install RTK separately and make sure `rtk rewrite` works in your shell.
-- Only Pi `bash` tool calls are rewritten.
-- If RTK fails or has no rewrite, the original command still runs.
