@@ -1,3 +1,5 @@
+
+
 # pi-stuff
 
 My small collection of [pi](https://github.com/badlogic/pi-mono) extension packages, only made possible by the incredible work of art from Mario.
@@ -169,4 +171,10 @@ Uses Codex's native encrypted server-side compaction for Pi's `openai-codex` mod
 pi install npm:@baggiiiie/pi-openai-server-compaction
 ```
 
+Notes:
+- Requires Node.js `>=22.19.0`.
+
+### `@baggiiiie/pi-rtk-rewrite`
+
+Rewrites Pi `bash` tool calls through [RTK](https://github.com/rtk-ai/rtk) before execution.
 
