@@ -2,7 +2,7 @@
 
 A pi package that visualises context usage two ways:
 
-- A live **chart** rendered in a Glimpse window.
+- A live **chart** and **context inspector** rendered in Glimpse, or your default browser if Glimpse is not installed.
 - A live **footer** showing the current context-window mix and totals.
 
 Both surfaces share a single computation, so they stay consistent and only recompute once per session event.
@@ -29,6 +29,17 @@ The footer is on by default. Override the startup behavior with:
 ```bash
 export PI_CONTEXT_CHART_FOOTER=off   # disable footer on launch (default: on)
 ```
+
+## Browser fallback and context inspector
+
+When Glimpse cannot be found, `/context-chart` opens a live HTML page in your default browser (macOS, Windows, or Linux with `xdg-open`). The page polls a loopback-only server once per second, using an unguessable URL. `/context-chart close` and session shutdown stop the server; they do not close the browser tab. Closing the tab alone does not stop the server. Browser launch failures are reported rather than silently ignored.
+
+Click **Context inspector** to view the system prompt, active tool definitions, and every ordered context message as expandable JSON (including text, thinking, tool calls/results, and summaries). **Complete raw JSON** shows the whole inspection snapshot. The inspector works even if Chart.js cannot load.
+
+- **Current context**: reconstructed from the active session branch while idle; observed messages while a request is starting.
+- **Last observed request**: the latest messages captured by this extension’s `context` event handler, retained after the turn ends. Cleared on session changes, branch navigation, and compaction; not persisted to disk.
+
+These are not guaranteed to be the exact provider HTTP payload: later extensions may modify messages, and provider conversion adds its own formatting. The system prompt and tool definitions are captured separately. Skills show the prompt’s available-skills listing, not the contents of unread skill files. Token counts remain estimates. The page contains potentially sensitive prompt and tool data; do not share its URL or raw JSON casually.
 
 ## How tokens are calculated
 
@@ -62,7 +73,7 @@ If `getContextUsage()` is unavailable (e.g. right after compaction, or for live 
 
 ### Per-turn history
 
-For the chart, each historical turn's snapshot is built by calling `buildSessionContext(entries, parentId, byId)` which reconstructs the full message array that was sent to the model for that specific turn. This means each data point reflects the **cumulative** context size at that moment, not just the incremental addition.
+For the chart, each historical turn's snapshot is built by calling `buildSessionContext(entries, parentId, byId)` which reconstructs the session message array preceding that turn (not necessarily the exact messages sent after extension transformations). This means each data point reflects the **cumulative** context size at that moment, not just the incremental addition.
 
 Hovering a point also shows the assistant turn's price when pi has pricing data for that turn. If the provider/model has no usable price data, the tooltip shows `unavailable`.
 
@@ -87,8 +98,17 @@ hitRate = cacheRead / (input + cacheRead + cacheWrite)
 
 Values are taken from the model's reported usage metadata accumulated across all assistant turns in the current branch. The rate is color-coded: green (≥70%), yellow (≥30%), or dim (<30%). Shows `--` if no prompt tokens have been reported yet.
 
+## Testing
+
+Unit/transport tests (Node with native TypeScript support):
+
+```bash
+node --test packages/context-chart/tests/context-chart.test.ts
+```
+
 ## Notes
 
 - Requires pi
-- The chart requires Glimpse to be installed where Node can resolve it, or `GLIMPSE_PATH` set to `.../glimpseui/src/glimpse.mjs`
+- Glimpse is optional. To use it, install it where Node can resolve it, or set `GLIMPSE_PATH` to `.../glimpseui/src/glimpse.mjs`. If Glimpse is found but fails to start, the error is reported.
+- Chart.js is loaded from a CDN and requires network access; the context inspector does not.
 - Footer uses pi's `ctx.getContextUsage()` when available, with a local estimate fallback (e.g. right after compaction)

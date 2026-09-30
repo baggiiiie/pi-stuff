@@ -1,4 +1,4 @@
-import type { AgentMessage, AssistantMessage, Usage } from "@mariozechner/pi-ai";
+import type { AssistantMessage, Usage } from "@mariozechner/pi-ai";
 import {
 	buildSessionContext,
 	estimateTokens,
@@ -7,6 +7,8 @@ import {
 	type ExtensionContext,
 	type SessionEntry,
 } from "@mariozechner/pi-coding-agent";
+
+type AgentMessage = ContextEvent["messages"][number];
 
 const EXTENSION_SNAPSHOT_VERSION = 1;
 
@@ -70,7 +72,16 @@ type PricingModel = {
 	};
 };
 
+export type ContextInspection = {
+	source: "reconstructed" | "observed";
+	capturedAt: number;
+	systemPrompt: string;
+	tools: ToolDef[];
+	messages: AgentMessage[];
+};
+
 export type SharedState = {
+	context: ContextInspection;
 	turn0Snapshot: Snapshot;
 	recordedSnapshots: Snapshot[];
 	liveSnapshot: Snapshot | null;
@@ -81,6 +92,8 @@ export type SharedState = {
 };
 
 export type ChartPayload = {
+	context: ContextInspection;
+	lastRequestContext?: ContextInspection;
 	points: Snapshot[];
 	meta: {
 		model: string | null;
@@ -121,20 +134,45 @@ export function computeSharedState(ctx: ExtensionContext, event?: ContextEvent, 
 	const turn0Snapshot = buildTurn0Snapshot(ctx, toolSections, toolDefTokens);
 	const recordedSnapshots = buildRecordedSnapshots(ctx, toolDefTokens);
 	const liveSnapshot = event ? buildLiveSnapshot(event, ctx, toolDefTokens) : null;
-	const currentSnapshot = buildCurrentContextSnapshot(ctx, toolDefTokens);
+	const entries = ctx.sessionManager.getEntries() as SessionEntry[];
+	const currentMessages = buildSessionContext(
+		entries,
+		ctx.sessionManager.getLeafId(),
+		new Map(entries.map((entry) => [entry.id, entry])),
+	).messages;
+	const currentSnapshot = buildSnapshot(
+		currentMessages,
+		ctx.getSystemPrompt() ?? "",
+		countAssistantMessages(ctx.sessionManager.getBranch()),
+		"recorded",
+		toolDefTokens,
+	);
 	const usage = collectUsage(ctx);
 	const contextUsage = ctx.getContextUsage();
 	const contextWindow = contextUsage?.contextWindow ?? ctx.model?.contextWindow ?? null;
-	return { turn0Snapshot, recordedSnapshots, liveSnapshot, currentSnapshot, usage, contextUsage, contextWindow };
+	const context: ContextInspection = {
+		source: event ? "observed" : "reconstructed",
+		capturedAt: Date.now(),
+		systemPrompt: ctx.getSystemPrompt() ?? "",
+		tools: structuredClone(tools),
+		messages: structuredClone(event?.messages ?? currentMessages),
+	};
+	return { context, turn0Snapshot, recordedSnapshots, liveSnapshot, currentSnapshot, usage, contextUsage, contextWindow };
 }
 
-export function buildChartPayload(state: SharedState, ctx: ExtensionContext): ChartPayload {
+export function buildChartPayload(
+	state: SharedState,
+	ctx: ExtensionContext,
+	lastRequestContext?: ContextInspection,
+): ChartPayload {
 	const points = [state.turn0Snapshot, ...mergeSnapshots(state.recordedSnapshots, state.liveSnapshot)];
 	const current = state.liveSnapshot ?? state.currentSnapshot;
 	const currentPercent =
 		state.contextWindow && current.total > 0 ? (current.total / state.contextWindow) * 100 : null;
 
 	return {
+		context: state.context,
+		lastRequestContext,
 		points,
 		meta: {
 			model: ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : null,
@@ -358,14 +396,6 @@ function buildLiveSnapshot(event: ContextEvent, ctx: ExtensionContext, toolDefTo
 	snapshot.summary = buildTurnSummary(lastUserText, []);
 
 	return snapshot;
-}
-
-function buildCurrentContextSnapshot(ctx: ExtensionContext, toolDefTokens: number): Snapshot {
-	const entries = ctx.sessionManager.getEntries() as SessionEntry[];
-	const byId = new Map(entries.map((entry) => [entry.id, entry]));
-	const currentContext = buildSessionContext(entries, ctx.sessionManager.getLeafId(), byId);
-	const currentTurn = countAssistantMessages(ctx.sessionManager.getBranch());
-	return buildSnapshot(currentContext.messages, ctx.getSystemPrompt() ?? "", currentTurn, "recorded", toolDefTokens);
 }
 
 function buildSnapshot(

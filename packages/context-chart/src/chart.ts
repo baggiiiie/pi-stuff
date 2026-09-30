@@ -5,6 +5,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import type { ChartPayload } from "./data.ts";
 import { renderHtml } from "./ui.ts";
+import { openBrowserChart } from "./browser.ts";
 
 const WINDOW_TITLE = "Session Context Usage";
 const require = createRequire(import.meta.url);
@@ -18,12 +19,15 @@ type GlimpseWindow = {
 };
 
 export type ChartWindow = {
+	/** Browser URL, if using the fallback. */
+	url?: string;
 	publish(payload: ChartPayload): void;
 	close(): void;
 };
 
 export async function openChartWindow(initialPayload: ChartPayload, onClosed: () => void): Promise<ChartWindow> {
 	const glimpsePath = resolveGlimpsePath();
+	if (!glimpsePath) return openBrowserChart(initialPayload, onClosed);
 	const { open } = await import(pathToFileURL(glimpsePath).href);
 	const win = open(renderHtml(initialPayload), {
 		width: 1280,
@@ -71,7 +75,7 @@ function run(command: string, args: string[]): string | null {
 	}
 }
 
-function resolveGlimpsePath(): string {
+function resolveGlimpsePath(): string | null {
 	if (cachedGlimpsePath) return cachedGlimpsePath;
 
 	const envPath = process.env.GLIMPSE_PATH;
@@ -123,7 +127,5 @@ function resolveGlimpsePath(): string {
 		}
 	}
 
-	throw new Error(
-		"Could not find Glimpse. Install `glimpseui` where Node can resolve it, or set GLIMPSE_PATH to .../glimpseui/src/glimpse.mjs.",
-	);
+	return null;
 }

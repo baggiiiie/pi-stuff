@@ -11,7 +11,7 @@ function safeJsonForScript(value: unknown): string {
         .replace(/\u2029/g, "\\u2029");
 }
 
-export function renderHtml(initialPayload: ChartPayload): string {
+export function renderHtml(initialPayload: ChartPayload, pollUrl?: string): string {
     return `<!doctype html>
 <html>
 <head>
@@ -242,6 +242,11 @@ export function renderHtml(initialPayload: ChartPayload): string {
 			border-top: 1px solid var(--border);
 		}
 		.tool-result.open { display: block; }
+		.inspector-entry { margin: 8px 0; border: 1px solid var(--border); padding: 8px; }
+		.inspector-entry summary { cursor: pointer; font-family: ${MONO_FONT}; font-size: 12px; }
+		.inspector-entry pre { white-space: pre-wrap; overflow-wrap: anywhere; font-family: ${MONO_FONT}; font-size: 11px; }
+		.inspector-note { color: var(--muted); font-size: 12px; line-height: 1.5; }
+		.inspector-source { margin-bottom: 12px; }
 		.footer {
 			display: flex;
 			justify-content: space-between;
@@ -290,6 +295,7 @@ export function renderHtml(initialPayload: ChartPayload): string {
 		<div class="chart-shell">
 			<div style="display:flex;justify-content:flex-end;margin-bottom:8px;">
 				<div class="chart-toggle">
+					<button onclick="showInspector()">Context inspector</button>
 					<button id="btnLine" class="active" onclick="setChartType('line')">Line</button>
 					<button id="btnBar" onclick="setChartType('bar')">Bar</button>
 				</div>
@@ -327,6 +333,8 @@ export function renderHtml(initialPayload: ChartPayload): string {
 		let chart;
 		let currentPayload = null;
 		let chartType = 'line';
+		let inspectorOpen = false;
+		let inspectorSource = 'current';
 
 		function formatTokens(value) {
 			if (value == null || Number.isNaN(value)) return '—';
@@ -511,6 +519,7 @@ export function renderHtml(initialPayload: ChartPayload): string {
 		window.updateChart = function updateChart(payload) {
 			currentPayload = payload;
 			updateMeta(payload);
+			if (inspectorOpen) renderInspector();
 			const empty = document.getElementById('emptyState');
 			const instance = ensureChart();
 			if (!instance) {
@@ -529,6 +538,7 @@ export function renderHtml(initialPayload: ChartPayload): string {
 		}
 
 		function showDetail(index) {
+			inspectorOpen = false;
 			const point = currentPayload?.points[index];
 			if (!point) return;
 			const overlay = document.getElementById('detailOverlay');
@@ -573,7 +583,64 @@ export function renderHtml(initialPayload: ChartPayload): string {
 			overlay.classList.add('visible');
 		}
 
+		window.showInspector = function showInspector() {
+			inspectorOpen = true;
+			renderInspector();
+			document.getElementById('detailOverlay').classList.add('visible');
+		};
+
+		function renderInspector() {
+			const body = document.getElementById('detailBody');
+			const scrollTop = body.parentElement.scrollTop;
+			const expanded = new Set(Array.from(body.querySelectorAll('details[open]')).map(el => el.dataset.key));
+			const view = inspectorSource === 'last' ? currentPayload.lastRequestContext : currentPayload.context;
+			document.getElementById('detailTitle').textContent = 'Context inspector';
+			body.replaceChildren();
+			const select = document.createElement('select');
+			select.className = 'inspector-source';
+			select.setAttribute('aria-label', 'Context source');
+			for (const [value, label] of [['current', 'Current context'], ['last', 'Last observed request']]) {
+				const option = document.createElement('option');
+				option.value = value;
+				option.textContent = label;
+				option.selected = inspectorSource === value;
+				select.append(option);
+			}
+			select.onchange = () => { inspectorSource = select.value; renderInspector(); };
+			body.append(select);
+			const note = document.createElement('p');
+			note.className = 'inspector-note';
+			note.textContent = !view ? 'No request observed yet. Send a message to capture one.' :
+				(view.source === 'observed' ? 'Observed in the context event before a model request' : 'Reconstructed from the current session branch') +
+				' • ' + new Date(view.capturedAt).toLocaleTimeString() +
+				'. Not the exact provider payload: later extensions or provider formatting may change it. Token counts are estimates.';
+			body.append(note);
+			if (!view) return;
+			function section(key, title, content) {
+				const entry = document.createElement('details');
+				entry.className = 'inspector-entry';
+				entry.dataset.key = key;
+				entry.open = expanded.has(key);
+				const summary = document.createElement('summary');
+				summary.textContent = title;
+				const pre = document.createElement('pre');
+				// Render content only when expanded.
+				entry.ontoggle = () => { pre.textContent = entry.open ? content() : ''; };
+				if (entry.open) pre.textContent = content();
+				entry.append(summary, pre);
+				body.append(entry);
+			}
+			section('system', 'System prompt', () => view.systemPrompt || '(empty)');
+			view.tools.forEach((tool, i) => section('tool-' + i, 'Tool definition: ' + tool.name, () => JSON.stringify(tool, null, 2)));
+			view.messages.forEach((message, i) => section('message-' + i,
+				(i + 1) + '. ' + message.role + (message.toolName ? ' — ' + message.toolName : ''),
+				() => JSON.stringify(message, null, 2)));
+			section('raw', 'Complete raw JSON', () => JSON.stringify(view, null, 2));
+			body.parentElement.scrollTop = scrollTop;
+		}
+
 		window.closeDetail = function closeDetail() {
+			inspectorOpen = false;
 			document.getElementById('detailOverlay').classList.remove('visible');
 		};
 
@@ -586,6 +653,23 @@ export function renderHtml(initialPayload: ChartPayload): string {
 
 		window.updateChart(${safeJsonForScript(initialPayload)});
 
+		const pollUrl = ${safeJsonForScript(pollUrl ?? null)};
+		if (pollUrl) {
+			async function poll() {
+				try {
+					const response = await fetch(pollUrl, { cache: 'no-store', signal: AbortSignal.timeout(5000) });
+					if (!response.ok) throw new Error('Chart server unavailable');
+					const payload = await response.json();
+					if (payload.meta.updatedAt !== currentPayload.meta.updatedAt) window.updateChart(payload);
+					else updateMeta(payload);
+				} catch {
+					document.getElementById('updatedAt').textContent = 'Disconnected — chart server closed or unavailable';
+				}
+				setTimeout(poll, 1000);
+			}
+			poll();
+		}
+
 		// Cmd+/- zoom support
 		(function() {
 			let zoomLevel = 1;
@@ -595,7 +679,7 @@ export function renderHtml(initialPayload: ChartPayload): string {
 			document.addEventListener('keydown', (e) => {
 				if (e.key === 'Escape') { closeDetail(); return; }
 				if (!(e.metaKey || e.ctrlKey)) return;
-				if (e.key === 'w') {
+				if (e.key === 'w' && window.webkit?.messageHandlers?.glimpse) {
 					e.preventDefault();
 					window.webkit.messageHandlers.glimpse.postMessage(JSON.stringify({__glimpse_close: true}));
 					return;

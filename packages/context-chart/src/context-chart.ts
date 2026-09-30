@@ -6,6 +6,7 @@ import {
 	buildFooterViewModel,
 	computeSharedState,
 	formatTokens,
+	type ContextInspection,
 	type SharedState,
 	type ToolDef,
 } from "./data.ts";
@@ -15,9 +16,12 @@ const KEY = "context-chart";
 
 export default function (pi: ExtensionAPI) {
 	let state: SharedState | null = null;
+	let lastRequestContext: ContextInspection | undefined;
 	let footerEnabled = readFooterDefault(process.env.PI_CONTEXT_CHART_FOOTER);
 	let footerRegistered = false;
 	let chartWindow: ChartWindow | null = null;
+	let chartOpening: Promise<void> | null = null;
+	let chartGeneration = 0;
 	let tuiRef: { requestRender(): void } | null = null;
 
 	function getToolDefs(): ToolDef[] {
@@ -37,14 +41,15 @@ export default function (pi: ExtensionAPI) {
 		}
 	}
 
-	function ensureState(ctx: ExtensionContext, event?: ContextEvent): SharedState {
-		if (!state) state = computeSharedState(ctx, event, getToolDefs());
+	function ensureState(ctx: ExtensionContext): SharedState {
+		if (!state) state = computeSharedState(ctx, undefined, getToolDefs());
 		return state;
 	}
 
 	function refresh(ctx: ExtensionContext, event?: ContextEvent) {
 		state = computeSharedState(ctx, event, getToolDefs());
-		if (chartWindow) chartWindow.publish(buildChartPayload(state, ctx));
+		if (event) lastRequestContext = state.context;
+		if (chartWindow) chartWindow.publish(buildChartPayload(state, ctx, lastRequestContext));
 		if (footerRegistered && tuiRef) tuiRef.requestRender();
 	}
 
@@ -76,26 +81,40 @@ export default function (pi: ExtensionAPI) {
 	}
 
 	async function openChart(ctx: ExtensionContext) {
-		const s = ensureState(ctx);
-		const payload = buildChartPayload(s, ctx);
+		if (chartOpening) return chartOpening;
+		const payload = buildChartPayload(ensureState(ctx), ctx, lastRequestContext);
 		if (chartWindow) {
 			chartWindow.publish(payload);
 			return;
 		}
-		chartWindow = await openChartWindow(payload, () => {
-			chartWindow = null;
-		});
+		const generation = ++chartGeneration;
+		chartOpening = (async () => {
+			const win = await openChartWindow(payload, () => {
+				if (generation === chartGeneration) {
+					chartGeneration++;
+					chartWindow = null;
+				}
+			});
+			// Close a window that finished opening after close or shutdown.
+			if (generation !== chartGeneration) {
+				win.close();
+				return;
+			}
+			chartWindow = win;
+			win.publish(buildChartPayload(ensureState(ctx), ctx, lastRequestContext));
+		})().finally(() => { chartOpening = null; });
+		return chartOpening;
 	}
 
 	function closeChart() {
-		if (chartWindow) {
-			chartWindow.close();
-			chartWindow = null;
-		}
+		chartGeneration++;
+		const win = chartWindow;
+		chartWindow = null;
+		win?.close();
 	}
 
 	pi.registerCommand(KEY, {
-		description: "Open a live context usage chart in Glimpse and/or toggle the context footer",
+		description: "Open a live context chart and inspector in Glimpse or your browser, or toggle the footer",
 		handler: async (args, ctx) => {
 			const command = args.trim().toLowerCase();
 
@@ -103,7 +122,10 @@ export default function (pi: ExtensionAPI) {
 				case "": {
 					try {
 						await openChart(ctx);
-						ctx.ui.notify("Context chart opened", "info");
+						if (chartWindow) {
+							const message = chartWindow.url ? `Context chart opened in browser: ${chartWindow.url}` : "Context chart opened";
+							ctx.ui.notify(message, "info");
+						}
 					} catch (error) {
 						const message = error instanceof Error ? error.message : String(error);
 						ctx.ui.notify(`Failed to open context chart: ${message}`, "info");
@@ -111,7 +133,7 @@ export default function (pi: ExtensionAPI) {
 					return;
 				}
 				case "close":
-					if (chartWindow) {
+					if (chartWindow || chartOpening) {
 						closeChart();
 						ctx.ui.notify("Context chart closed", "info");
 					} else {
@@ -176,11 +198,13 @@ export default function (pi: ExtensionAPI) {
 		refresh(ctx);
 	};
 
-	pi.on("session_start", handleSessionUpdate);
-	pi.on("session_switch", handleSessionUpdate);
-	pi.on("session_fork", handleSessionUpdate);
-	pi.on("session_compact", handleSessionUpdate);
-	pi.on("session_tree", handleSessionUpdate);
+	const handleContextReset = (event: unknown, ctx: ExtensionContext) => {
+		lastRequestContext = undefined;
+		handleSessionUpdate(event, ctx);
+	};
+	pi.on("session_start", handleContextReset);
+	pi.on("session_compact", handleContextReset);
+	pi.on("session_tree", handleContextReset);
 	pi.on("turn_end", handleSessionUpdate);
 	pi.on("model_select", handleSessionUpdate);
 
@@ -190,6 +214,7 @@ export default function (pi: ExtensionAPI) {
 
 	pi.on("session_shutdown", (_event, ctx) => {
 		state = null;
+		lastRequestContext = undefined;
 		closeChart();
 		unregisterFooter(ctx);
 		ctx.ui.setWidget(KEY, undefined);
